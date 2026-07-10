@@ -27,7 +27,8 @@ from piltover.tl import Updates, UpdateNewMessage, UpdateMessageID, UpdateReadHi
     UpdateUserPhone, UpdateNotifySettings, UpdateSavedGifs, UpdateBotInlineQuery, UpdateRecentStickers, \
     UpdateFavedStickers, UpdateSavedDialogPinned, UpdatePinnedSavedDialogs, UpdatePrivacy, \
     UpdateChannelReadMessagesContents, UpdateChannelAvailableMessages, UpdatePhoneCall, UpdatePhoneCallSignalingData, \
-    UpdateReadChannelOutbox, UpdatePinnedChannelMessages, UpdateUserEmojiStatus, EmojiStatusEmpty, PeerChat
+    UpdateReadChannelOutbox, UpdatePinnedChannelMessages, UpdateUserEmojiStatus, EmojiStatusEmpty, PeerChat, \
+    UpdateStarsBalance, StarsAmount
 from piltover.tl.layer_info import layer
 from piltover.tl.to_format import ChannelMessageToFormat
 from piltover.tl.to_format.update_message_id import UpdateMessageIDToFormat
@@ -2200,4 +2201,12 @@ async def update_user_emoji_status(user: User, status: UserEmojiStatus | None) -
 
     await SessionManager.send(updates, user.id)
 
+    return updates
+
+
+async def update_stars_balance(user_id: int, balance: StarsAmount) -> Updates:
+    updates = UpdatesWithDefaults(
+        updates=[UpdateStarsBalance(balance=balance)],
+    )
+    await SessionManager.send(updates, user_id)
     return updates

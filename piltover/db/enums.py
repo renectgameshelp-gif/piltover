@@ -533,3 +533,18 @@ CALL_DISCARD_REASON_FROM_TL: dict[type[TLPhoneCallDiscardReasonBase], CallDiscar
     PhoneCallDiscardReasonHangup: CallDiscardReason.HANGUP,
     PhoneCallDiscardReasonBusy: CallDiscardReason.BUSY,
 }
+
+
+class StarsTransactionPeerType(IntEnum):
+    FRAGMENT = 0
+    APP_STORE = 1
+    PLAY_MARKET = 2
+    PREMIUM_BOT = 3
+    PEER = 4
+    ADS = 5
+    API = 6
+
+
+class StarsPaymentPurpose(IntEnum):
+    TOPUP = 1
+    GIFT = 2

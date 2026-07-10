@@ -1,19 +1,16 @@
 from piltover.enums import ReqHandlerFlags
-from piltover.tl import StarsAmount, TLObjectVector, StarsTopupOption, EmojiList, StatsGraphError
+from piltover.tl import EmojiList, StatsGraphError
 from piltover.tl.functions.account import GetCollectibleEmojiStatuses, GetContactSignUpNotification, \
     SetContactSignUpNotification, GetChannelRestrictedStatusEmojis
 from piltover.tl.functions.bots import GetPopularAppBots, GetBotRecommendations
 from piltover.tl.functions.channels import GetChannelRecommendations
 from piltover.tl.functions.contacts import GetSponsoredPeers
-from piltover.tl.functions.payments import GetStarsStatus, GetStarsSubscriptions, GetStarsTransactions, \
-    GetStarsTopupOptions
 from piltover.tl.functions.premium import GetBoostsStatus, GetMyBoosts, GetBoostsList
 from piltover.tl.functions.stats import GetBroadcastRevenueStats
 from piltover.tl.types.account import EmojiStatuses
 from piltover.tl.types.bots import PopularAppBots
 from piltover.tl.types.contacts import SponsoredPeers
 from piltover.tl.types.messages import Chats
-from piltover.tl.types.payments import StarsStatus
 from piltover.tl.types.premium import BoostsStatus, MyBoosts, BoostsList
 from piltover.tl.types.stats import BroadcastRevenueStats
 from piltover.tl.types.users import Users
@@ -43,15 +40,6 @@ async def get_my_boosts() -> MyBoosts:  # pragma: no cover
     return MyBoosts(my_boosts=[], chats=[], users=[])
 
 
-@handler.on_request(GetStarsStatus, ReqHandlerFlags.AUTH_NOT_REQUIRED)
-async def get_stars_status() -> StarsStatus:  # pragma: no cover
-    return StarsStatus(
-        balance=StarsAmount(amount=MAX_I64, nanos=0),
-        chats=[],
-        users=[],
-    )
-
-
 @handler.on_request(GetCollectibleEmojiStatuses, ReqHandlerFlags.AUTH_NOT_REQUIRED)
 async def get_collectible_emoji_statuses() -> EmojiStatuses:  # pragma: no cover
     return EmojiStatuses(
@@ -67,40 +55,6 @@ async def get_boosts_list() -> BoostsList:  # pragma: no cover
         boosts=[],
         users=[],
     )
-
-
-@handler.on_request(GetStarsSubscriptions, ReqHandlerFlags.AUTH_NOT_REQUIRED)
-async def get_starts_subscriptions() -> StarsStatus:  # pragma: no cover
-    return StarsStatus(
-        balance=StarsAmount(amount=MAX_I64, nanos=0),
-        chats=[],
-        users=[],
-    )
-
-
-@handler.on_request(GetStarsTransactions, ReqHandlerFlags.AUTH_NOT_REQUIRED)
-async def get_starts_transactions() -> StarsStatus:  # pragma: no cover
-    return StarsStatus(
-        balance=StarsAmount(amount=MAX_I64, nanos=0),
-        chats=[],
-        users=[],
-    )
-
-
-@handler.on_request(GetStarsTopupOptions, ReqHandlerFlags.AUTH_NOT_REQUIRED)
-async def get_stars_topup_options() -> list[StarsTopupOption]:  # pragma: no cover
-    return TLObjectVector([
-        StarsTopupOption(
-            stars=1,
-            currency="USD",
-            amount=MAX_I64,
-        ),
-        StarsTopupOption(
-            stars=2,
-            currency="USD",
-            amount=-1,
-        )
-    ])
 
 
 @handler.on_request(GetContactSignUpNotification, NOBOT_NOAUTH)

@@ -277,7 +277,7 @@ APP_CONFIG_JSON = JsonObject(value=[
     JsonObjectValue(key="stars_gifts_enabled", value=JsonBool(value=False)),
     JsonObjectValue(key="stars_paid_post_amount_max", value=JsonNumber(value=2500.0)),
     JsonObjectValue(key="stars_paid_reaction_amount_max", value=JsonNumber(value=2500.0)),
-    JsonObjectValue(key="stars_purchase_blocked", value=JsonBool(value=True)),
+    JsonObjectValue(key="stars_purchase_blocked", value=JsonBool(value=False)),
     JsonObjectValue(key="stars_revenue_withdrawal_min", value=JsonNumber(value=1000.0)),
     JsonObjectValue(key="stars_subscription_amount_max", value=JsonNumber(value=2500.0)),
     JsonObjectValue(key="stars_usd_sell_rate_x1000", value=JsonNumber(value=1410.0)),
