@@ -43,7 +43,7 @@ _check_req_pq_tlid = (
 
 class Client:
     __slots__ = (
-        "server", "reader", "writer", "conn", "peername", "gen_auth_data", "empty_session", "disconnect_timeout",
+        "server", "reader", "writer", "conn", "peername", "gen_auth_data", "keygen_session", "disconnect_timeout",
         "write_lock", "active_sessions", "active_keys", "message_available", "loop", "tasks",
     )
 
@@ -56,7 +56,6 @@ class Client:
         self.peername: tuple[str, int] = writer.get_extra_info("peername")
 
         self.gen_auth_data: GenAuthData | None = None
-        self.empty_session = Session(0)
 
         self.disconnect_timeout: asyncio.Timeout | None = None
         self.write_lock = asyncio.Lock()
@@ -65,6 +64,9 @@ class Client:
         self.active_keys = cast("LRU[int, bytes]", LRU(8))
 
         self.message_available = Event()
+        self.keygen_session = Session(0)
+        self.keygen_session.client = self
+        self.keygen_session.message_available = self.message_available
         self.loop = asyncio.get_running_loop()
         self.tasks = set()
 
@@ -147,12 +149,12 @@ class Client:
 
         await self._write_packet(encrypted)
 
+    async def _write_unencrypted(self, message_id: int, data: bytes) -> None:
+        logger.debug("Sending unencrypted message {message_id}", message_id=message_id)
+        await self._write_packet(UnencryptedMessagePacket(message_id, data))
+
     async def send_unencrypted(self, obj: TLObject) -> None:
-        logger.debug(obj)
-        await self._write_packet(UnencryptedMessagePacket(
-            self.empty_session.msg_id(in_reply=True),
-            obj.write(),
-        ))
+        await self.keygen_session.enqueue_unencrypted(obj)
 
     async def _kiq(self, obj: TLObject, session: Session, message_id: int | None = None) -> AsyncTaskiqTask:
         # TODO: dont do .write.hex(), RpcResponse somehow doesn't need encoding it manually, check how exactly
@@ -190,16 +192,19 @@ class Client:
             await session.refresh_auth_maybe()
 
         if isinstance(req_message.obj, MsgContainer):
-            await asyncio.gather(*[
-                self.propagate(msg, session)
-                for msg in req_message.obj.messages
-            ])
+            for msg in req_message.obj.messages:
+                await self.propagate(msg, session)
         else:
             await self.propagate(req_message, session)
 
-    async def recv(self):
+    async def recv(self) -> None:
         packet = await self.read_packet()
+        if packet is None:
+            return
 
+        await self._recv_packet(packet)
+
+    async def _recv_packet(self, packet: MessagePacket) -> None:
         if isinstance(packet, EncryptedMessagePacket):
             auth_data = None
             if packet.auth_key_id in self.active_keys:
@@ -314,12 +319,40 @@ class Client:
     async def _worker_loop_recv(self) -> None:
         while True:
             try:
-                await self.recv()
+                while True:
+                    packet = await self.read_packet()
+                    if packet is None:
+                        break
+                    await self._recv_packet(packet)
             except Disconnection:
                 raise
             except Exception as e:
                 logger.opt(exception=e).error("An error occurred in recv loop")
                 raise
+
+    def _outbound_sessions(self) -> list[Session]:
+        return [self.keygen_session, *list(self.active_sessions.values())]
+
+    def _has_pending_outbound(self) -> bool:
+        for session in self._outbound_sessions():
+            if session.unencrypted_queue.qsize() or session.message_queue.qsize():
+                return True
+        return False
+
+    async def _flush_session_outbound(self, session: Session) -> None:
+        while True:
+            try:
+                message_id, data = session.unencrypted_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            await self._write_unencrypted(message_id, data)
+
+        while True:
+            try:
+                message_id, seq_no, data = session.message_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            await self._write_message(message_id, seq_no, data, session)
 
     async def _worker_loop_send(self) -> None:
         while True:
@@ -328,15 +361,10 @@ class Client:
             except TimeoutError:
                 pass
 
-            sent = False
-            for session in list(self.active_sessions.values()):
-                if session.message_queue.empty():
-                    continue
-                message_id, seq_no, data = session.message_queue.get_nowait()
-                await self._write_message(message_id, seq_no, data, session)
-                sent = True
+            for session in self._outbound_sessions():
+                await self._flush_session_outbound(session)
 
-            if not sent and not any(not sess.message_queue.empty() for sess in self.active_sessions.values()):
+            if not self._has_pending_outbound():
                 self.message_available.clear()
 
     async def _timer_task(self) -> None:

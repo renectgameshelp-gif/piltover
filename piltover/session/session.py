@@ -50,7 +50,8 @@ class Session:
     __slots__ = (
         "client", "session_id", "auth_data", "min_msg_id", "user_id", "auth_id", "channel_ids", "auth_loaded_at",
         "channels_loaded_at", "salt_now", "salt_prev", "no_updates", "layer", "is_bot", "mfa_pending", "msg_id_values",
-        "out_seq_no", "message_queue", "message_available", "is_internal_push", "had_init_connection",
+        "out_seq_no", "message_queue", "unencrypted_queue", "message_available", "is_internal_push",
+        "had_init_connection", "_enqueue_lock",
     )
 
     def __init__(self, session_id: int, client: Client | None = None, auth_data: AuthData | None = None) -> None:
@@ -80,7 +81,9 @@ class Session:
         self.is_internal_push = False
 
         self.message_queue = Queue()
+        self.unencrypted_queue = Queue()
         self.message_available: Event | None = None
+        self._enqueue_lock = asyncio.Lock()
 
         # TODO: store request states (i.e. received, processing, acked, etc.)
         # TODO: store whole session in redis or something
@@ -117,79 +120,97 @@ class Session:
         else:
             return getattr(obj, field_name)
 
+    async def enqueue_unencrypted(self, obj: TLObject, in_reply: bool = True) -> None:
+        if self.client is None:
+            return
+
+        async with self._enqueue_lock:
+            await asyncio.sleep(0)
+
+            message_id = self.msg_id(in_reply=in_reply)
+            logger.debug(
+                "Queueing unencrypted message {message_id} to {session_id}: {message!r}",
+                message_id=message_id, session_id=self.session_id, message=obj,
+            )
+            self.unencrypted_queue.put_nowait((message_id, obj.write()))
+
+            if self.message_available is not None:
+                self.message_available.set()
+
     async def enqueue(self, obj: TLObject, in_reply: bool) -> None:
         if self.client is None:
             return
 
-        await asyncio.sleep(0)
+        async with self._enqueue_lock:
+            await asyncio.sleep(0)
 
-        if isinstance(obj, ObjectWithLayerRequirement):
-            field_paths = obj.fields
-            obj = obj.object
+            if isinstance(obj, ObjectWithLayerRequirement):
+                field_paths = obj.fields
+                obj = obj.object
 
-            for field_path in field_paths:
-                if field_path.min_layer <= self.layer <= field_path.max_layer:
-                    continue
+                for field_path in field_paths:
+                    if field_path.min_layer <= self.layer <= field_path.max_layer:
+                        continue
 
-                field_path = field_path.field.split(".")
-                parent = obj
-                for field_name in field_path[:-1]:
-                    parent = self._get_attr_or_element(parent, field_name)
+                    field_path = field_path.field.split(".")
+                    parent = obj
+                    for field_name in field_path[:-1]:
+                        parent = self._get_attr_or_element(parent, field_name)
 
-                if not isinstance(parent, list):
-                    continue
+                    if not isinstance(parent, list):
+                        continue
 
-                del parent[int(field_path[-1])]
+                    del parent[int(field_path[-1])]
 
-        context_values = None
-        if isinstance(obj, NeedsContextValues):
-            with measure_time("._resolve_context_values(...)"):
-                context_values = await self._resolve_context_values(obj)
-            obj = obj.obj
+            context_values = None
+            if isinstance(obj, NeedsContextValues):
+                with measure_time("._resolve_context_values(...)"):
+                    context_values = await self._resolve_context_values(obj)
+                obj = obj.obj
 
-        # TODO: use *ToFormat?
-        if isinstance(obj, Updates) and self.auth_id is not None:
-            await UserAuthorization.filter(id=self.auth_id).update(upd_seq=F("upd_seq") + 1)
-            upd_seq = await UserAuthorization.get_or_none(id=self.auth_id).values_list("upd_seq", flat=True)
-            if upd_seq is None:
-                upd_seq = 0
-            logger.trace(f"setting seq to {upd_seq} for user {self.user_id}, auth {self.auth_id}")
-            obj.seq = upd_seq
+            # TODO: use *ToFormat?
+            if isinstance(obj, Updates) and self.auth_id is not None:
+                await UserAuthorization.filter(id=self.auth_id).update(upd_seq=F("upd_seq") + 1)
+                upd_seq = await UserAuthorization.get_or_none(id=self.auth_id).values_list("upd_seq", flat=True)
+                if upd_seq is None:
+                    upd_seq = 0
+                logger.trace(f"setting seq to {upd_seq} for user {self.user_id}, auth {self.auth_id}")
+                obj.seq = upd_seq
 
-        with measure_time("session.pack_message(...)"):
-            message = self.pack_message(obj, in_reply)
+            with measure_time("session.pack_message(...)"):
+                message = self.pack_message(obj, in_reply)
 
-        logger.debug(
-            "Queueing message {message_id} to {session_id}: {message!r}",
-            message_id=message.message_id, session_id=self.session_id, message=message,
-        )
-        logger.debug(
-            (
-                "SerializationContext: "
-                "user_id={user_id}, "
-                "auth_id={auth_id}, "
-                "layer={layer}, "
-                "context_values={context_values}"
-            ),
-            user_id=self.user_id, auth_id=self.auth_id, layer=self.layer, context_values=context_values,
-        )
-
-        with measure_time("<serialize message>"):
-            ctx = SerializationContext(
-                auth_id=self.auth_id,
-                user_id=self.user_id,
-                layer=self.layer,
-                values=context_values,
+            logger.debug(
+                "Queueing message {message_id} to {session_id}: {message!r}",
+                message_id=message.message_id, session_id=self.session_id, message=message,
             )
-            # TODO: serialize in a different thread
-            self.message_queue.put_nowait((message.message_id, message.seq_no, message.obj.write(ctx)))
+            logger.debug(
+                (
+                    "SerializationContext: "
+                    "user_id={user_id}, "
+                    "auth_id={auth_id}, "
+                    "layer={layer}, "
+                    "context_values={context_values}"
+                ),
+                user_id=self.user_id, auth_id=self.auth_id, layer=self.layer, context_values=context_values,
+            )
 
-        if self.message_available is not None:
-            self.message_available.set()
+            with measure_time("<serialize message>"):
+                ctx = SerializationContext(
+                    auth_id=self.auth_id,
+                    user_id=self.user_id,
+                    layer=self.layer,
+                    values=context_values,
+                )
+                # TODO: serialize in a different thread
+                self.message_queue.put_nowait((message.message_id, message.seq_no, message.obj.write(ctx)))
 
-        if isinstance(obj, Updates):
-            obj.seq = 0
-            obj.qts = 0
+            if self.message_available is not None:
+                self.message_available.set()
+
+            if isinstance(obj, Updates):
+                obj.seq = 0
+                obj.qts = 0
 
     @staticmethod
     def make_salt(salt_key: bytes, auth_key_id: int, timestamp: int) -> bytes:
