@@ -10,9 +10,9 @@ from piltover.db.enums import PeerType
 from piltover.exceptions import ErrorRpc
 from piltover.tl import (
     StarsAmount, InputInvoiceStars, InputStorePaymentStarsTopup, InputStorePaymentStarsGift,
-    Invoice, LabeledPrice, PaymentFormStars,
+    Invoice, LabeledPrice,
 )
-from piltover.tl.types.payments import StarsStatus
+from piltover.tl.types.payments import PaymentFormStars, StarsStatus
 from piltover.utils.users_chats_channels import UsersChatsChannels
 
 SYSTEM_STARS_BOT_ID = 777000
