@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from loguru import logger
 from tortoise import migrations
-from tortoise.expressions import Subquery
 from tortoise.migrations import operations as ops
 from tortoise.migrations.schema_editor import BaseSchemaEditor
 from tortoise.migrations.schema_generator.state_apps import StateApps
@@ -18,14 +17,18 @@ if TYPE_CHECKING:
 BATCH_SIZE = 1000
 
 
+async def _delete_orphans(queryset: QuerySet[MODEL]) -> None:
+    ids_to_delete = await queryset.values_list("id", flat=True)
+    if ids_to_delete:
+        await queryset.model.filter(id__in=ids_to_delete).delete()
+
+
 async def forwards_dialogs(apps: StateApps, schema_editor: BaseSchemaEditor) -> None:
     from piltover.db.enums import PeerType
 
     Dialog: type[DialogT] = apps.get_model("models", "Dialog")
 
-    await Dialog.filter(
-        id__in=Subquery(Dialog.filter(owner_id__isnull=True, peer__owner_id__isnull=True).values("id"))
-    ).delete()
+    await _delete_orphans(Dialog.filter(owner_id__isnull=True, peer__owner_id__isnull=True))
 
     base_query = Dialog.filter(owner_id__isnull=True).order_by("id").limit(BATCH_SIZE).select_related("peer")
     total_count = await base_query.count()
@@ -54,9 +57,7 @@ async def forwards_saveddialogs(apps: StateApps, schema_editor: BaseSchemaEditor
 
     SavedDialog: type[SavedDialogT] = apps.get_model("models", "SavedDialog")
 
-    await SavedDialog.filter(
-        id__in=Subquery(SavedDialog.filter(owner_id__isnull=True, peer__owner_id__isnull=True).values("id"))
-    ).delete()
+    await _delete_orphans(SavedDialog.filter(owner_id__isnull=True, peer__owner_id__isnull=True))
 
     base_query = SavedDialog.filter(owner_id__isnull=True).order_by("id").limit(BATCH_SIZE).select_related("peer")
     total_count = await base_query.count()
@@ -85,9 +86,7 @@ async def forwards_readstates(apps: StateApps, schema_editor: BaseSchemaEditor) 
 
     ReadState: type[ReadStateT] = apps.get_model("models", "ReadState")
 
-    await ReadState.filter(
-        id__in=Subquery(ReadState.filter(owner_id__isnull=True, peer__owner_id__isnull=True).values("id"))
-    ).delete()
+    await _delete_orphans(ReadState.filter(owner_id__isnull=True, peer__owner_id__isnull=True))
 
     base_query = ReadState.filter(owner_id__isnull=True).order_by("id").limit(BATCH_SIZE).select_related("peer")
     total_count = await base_query.count()
@@ -116,9 +115,7 @@ async def forwards_messagedrafts(apps: StateApps, schema_editor: BaseSchemaEdito
 
     MessageDraft: type[MessageDraftT] = apps.get_model("models", "MessageDraft")
 
-    await MessageDraft.filter(
-        id__in=Subquery(MessageDraft.filter(user_id__isnull=True, peer__owner_id__isnull=True).values("id"))
-    ).delete()
+    await _delete_orphans(MessageDraft.filter(user_id__isnull=True, peer__owner_id__isnull=True))
 
     base_query = MessageDraft.filter(user_id__isnull=True).order_by("id").limit(BATCH_SIZE).select_related("peer")
     total_count = await base_query.count()
