@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 from loguru import logger
 
 from piltover.db.models import UserAuthorization, AuthKey
-from piltover.tl import InitConnection, MsgsAck, Ping, Pong, PingDelayDisconnect, InvokeWithLayer, InvokeAfterMsg, \
-    InvokeWithoutUpdates, RpcDropAnswer, DestroySession, DestroySessionOk, RpcAnswerUnknown, GetFutureSalts, \
-    FutureSalt, Long
+from piltover.tl import InitConnection, MsgsAck, MsgsStateReq, MsgsStateInfo, Ping, Pong, PingDelayDisconnect, \
+    InvokeWithLayer, InvokeAfterMsg, InvokeWithoutUpdates, RpcDropAnswer, DestroySession, DestroySessionOk, \
+    RpcAnswerUnknown, GetFutureSalts, FutureSalt, Long
 from piltover.tl.core_types import Message, RpcResult, FutureSalts
 
 if TYPE_CHECKING:
@@ -20,6 +20,12 @@ if TYPE_CHECKING:
 
 async def msgs_ack(_1: Client, _2: Message[MsgsAck], _3: Session) -> None:
     return
+
+
+async def msgs_state_req(_1: Client, request: Message[MsgsStateReq], _2: Session) -> MsgsStateInfo:
+    # 4 = message received (see core.telegram.org/mtproto/service_messages_about_messages)
+    info = "\x04" * len(request.obj.msg_ids)
+    return MsgsStateInfo(req_msg_id=request.message_id, info=info)
 
 
 async def ping(_1: Client, request: Message[Ping], _2: Session) -> Pong:
@@ -117,8 +123,9 @@ async def get_future_salts(client: Client, request: Message[GetFutureSalts], ses
     )
 
 
-SYSTEM_HANDLERS: dict[int, Callable[[Client, Message, Session], Awaitable[RpcResult | Pong | None]]] = {
+SYSTEM_HANDLERS: dict[int, Callable[[Client, Message, Session], Awaitable[RpcResult | Pong | MsgsStateInfo | None]]] = {
     MsgsAck.tlid(): msgs_ack,
+    MsgsStateReq.tlid(): msgs_state_req,
     Ping.tlid(): ping,
     PingDelayDisconnect.tlid(): ping_delay_disconnect,
     InvokeWithLayer.tlid(): invoke_with_layer,

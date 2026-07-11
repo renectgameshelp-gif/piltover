@@ -11,10 +11,10 @@ def is_content_related(obj: TLObject) -> bool:
 
 
 def is_id_strictly_not_content_related(obj_id: int) -> bool:
-    from . import core_types, MsgsAck
+    from . import core_types, MsgsAck, MsgsStateReq, MsgsStateInfo
     # TODO: msg_copy#e06046b2
     return obj_id in {
-        MsgsAck.tlid(), core_types.MsgContainer.tlid(),
+        MsgsAck.tlid(), MsgsStateReq.tlid(), MsgsStateInfo.tlid(), core_types.MsgContainer.tlid(),
         # TODO: IS GZIP-PACKED CONTENT RELATED OR NOT ?????
         # core_types.GzipPacked.tlid(),
     }
