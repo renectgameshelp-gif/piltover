@@ -208,7 +208,7 @@ async def discard_call(request: DiscardCall, user_id: int) -> Updates:
 
     other_user = call.other_user(user)
     peer: Peer
-    peer, _ = await Peer.get_or_create(owner_id=user, user=other_user, defaults={"type": PeerType.USER})
+    peer, _ = await Peer.get_or_create(owner_id=user_id, user=other_user, defaults={"type": PeerType.USER})
     peer.user = other_user
     await send_message_internal(
         user, peer, None, None, False, author=call.from_user_id, type=MessageType.SERVICE_PHONE_CALL,
