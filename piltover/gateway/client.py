@@ -5,7 +5,7 @@ import struct
 import time
 from asyncio import Event
 from io import BytesIO
-from typing import TYPE_CHECKING, cast, Any
+from typing import TYPE_CHECKING, cast, Any, Literal
 
 from loguru import logger
 from lru import LRU
@@ -40,11 +40,39 @@ _check_req_pq_tlid = (
     Int.write(ReqPqMulti.tlid(), False),
 )
 
+_SLOW_RPC_METHODS = frozenset({
+    "SendMedia", "SendMedia_148", "SendMedia_176",
+    "SendMultiMedia", "SendMultiMedia_148", "SendMultiMedia_176",
+    "UploadMedia", "UploadMedia_133",
+    "UploadProfilePhoto",
+    "UploadWallPaper", "UploadWallPaper_133",
+    "SaveFilePart", "SaveBigFilePart",
+})
+
+
+def _task_result_timeouts(method_name: str) -> tuple[float, float]:
+    from piltover.config import GATEWAY_CONFIG
+
+    ack_timeout = 1.5
+    result_timeout = 30.0
+    slow_timeout = 600.0
+    if GATEWAY_CONFIG is not None:
+        ack_timeout = GATEWAY_CONFIG.task_ack_timeout
+        result_timeout = GATEWAY_CONFIG.task_result_timeout
+        slow_timeout = GATEWAY_CONFIG.task_result_slow_timeout
+
+    if method_name in _SLOW_RPC_METHODS:
+        return ack_timeout, slow_timeout
+    return ack_timeout, result_timeout
+
+
+AuthGateResult = Literal["ok", "drop", "unregistered"]
+
 
 class Client:
     __slots__ = (
         "server", "reader", "writer", "conn", "peername", "gen_auth_data", "keygen_session", "disconnect_timeout",
-        "write_lock", "active_sessions", "active_keys", "message_available", "loop", "tasks",
+        "write_lock", "active_sessions", "active_keys", "message_available", "loop", "tasks", "_rejected_auth_keys",
     )
 
     def __init__(self, server: Gateway, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -69,6 +97,7 @@ class Client:
         self.keygen_session.message_available = self.message_available
         self.loop = asyncio.get_running_loop()
         self.tasks = set()
+        self._rejected_auth_keys: set[int] = set()
 
     @staticmethod
     def _session_evicted(_: Any, session: Session) -> None:
@@ -88,6 +117,48 @@ class Client:
 
         self.active_sessions[session.uniq_id()] = session
         return session, created
+
+    def _drop_auth_key(self, auth_key_id: int, session: Session) -> None:
+        try:
+            del self.active_keys[auth_key_id]
+        except KeyError:
+            pass
+        uniq_id = session.uniq_id()
+        try:
+            del self.active_sessions[uniq_id]
+        except KeyError:
+            pass
+        session.disconnect()
+
+    async def _auth_gate(self, auth_key_id: int, obj: TLObject | None = None) -> AuthGateResult:
+        if auth_key_id in self._rejected_auth_keys:
+            return "drop"
+        if not await AuthKey.is_registered(auth_key_id):
+            return "unregistered"
+        if isinstance(obj, BindTempAuthKey):
+            if not await AuthKey.can_bind_temp_auth_key(auth_key_id, obj.perm_auth_key_id):
+                return "unregistered"
+        return "ok"
+
+    @staticmethod
+    def _auth_key_unregistered_result(message_id: int) -> RpcResult:
+        return RpcResult(
+            req_msg_id=message_id,
+            result=RpcError(error_code=401, error_message="AUTH_KEY_UNREGISTERED"),
+        )
+
+    async def _respond_auth_key_unregistered(self, message_id: int, session: Session, auth_key_id: int) -> None:
+        if auth_key_id in self._rejected_auth_keys:
+            return
+
+        self._rejected_auth_keys.add(auth_key_id)
+        logger.info(
+            "Auth key {auth_key_id} is not registered, sending AUTH_KEY_UNREGISTERED to {peer}",
+            auth_key_id=auth_key_id,
+            peer=self.peername,
+        )
+        await session.enqueue(self._auth_key_unregistered_result(message_id), True)
+        self._drop_auth_key(auth_key_id, session)
 
     async def read_packet(self) -> MessagePacket | None:
         packet = self.conn.next_event()
@@ -193,9 +264,27 @@ class Client:
             await session.refresh_auth_maybe()
 
         if isinstance(req_message.obj, MsgContainer):
+            logger.info(
+                "gateway MsgContainer user={user_id} session={session_id} count={count} messages={messages}",
+                user_id=session.user_id,
+                session_id=session.session_id,
+                count=len(req_message.obj.messages),
+                messages=[
+                    f"{msg.obj.tlname()}#{msg.message_id} {msg.obj!r}"
+                    for msg in req_message.obj.messages
+                ],
+            )
             for msg in req_message.obj.messages:
                 await self.propagate(msg, session)
         else:
+            logger.info(
+                "gateway rpc {method} user={user_id} session={session_id} msg_id={message_id} request={request!r}",
+                method=req_message.obj.tlname(),
+                user_id=session.user_id,
+                session_id=session.session_id,
+                message_id=req_message.message_id,
+                request=req_message.obj,
+            )
             await self.propagate(req_message, session)
 
     async def recv(self) -> None:
@@ -207,6 +296,9 @@ class Client:
 
     async def _recv_packet(self, packet: MessagePacket) -> None:
         if isinstance(packet, EncryptedMessagePacket):
+            if packet.auth_key_id in self._rejected_auth_keys:
+                return
+
             auth_data = None
             if packet.auth_key_id in self.active_keys:
                 auth_key = self.active_keys[packet.auth_key_id]
@@ -272,9 +364,17 @@ class Client:
                 user_id=session.user_id,
                 message=message,
             )
-            task = self.loop.create_task(self.handle_encrypted_message(message, session))
-            self.tasks.add(task)
-            task.add_done_callback(self.tasks.discard)
+
+            match await self._auth_gate(packet.auth_key_id, message.obj):
+                case "drop":
+                    return
+                case "unregistered":
+                    await self._respond_auth_key_unregistered(message.message_id, session, packet.auth_key_id)
+                    raise Disconnection(404)
+                case "ok":
+                    pass
+
+            await self.handle_encrypted_message(message, session)
         elif isinstance(packet, UnencryptedMessagePacket):
             decoded = TLObject.read(BytesIO(packet.message_data))
             if isinstance(decoded, (ReqPq, ReqPqMulti)):
@@ -298,9 +398,17 @@ class Client:
 
     async def _get_auth_data(self, auth_key_id: int) -> AuthData:
         logger.debug("Requested auth key: {auth_key_id}", auth_key_id=auth_key_id)
-        data = await AuthKey.get_auth_data(auth_key_id)
+        if auth_key_id in self.server._unknown_auth_key_ids:
+            raise Disconnection(404)
+
+        data = await AuthKey.get_auth_data(auth_key_id, allow_expired=True)
         if data is None:
-            logger.info(f"Client ({self.peername}) sent unknown auth_key_id {auth_key_id}, disconnecting with 404")
+            self.server._unknown_auth_key_ids[auth_key_id] = None
+            logger.info(
+                "Client ({peer}) sent unknown auth_key_id {auth_key_id}, disconnecting with -404",
+                peer=self.peername,
+                auth_key_id=auth_key_id,
+            )
             raise Disconnection(404)
 
         return data
@@ -341,6 +449,9 @@ class Client:
         return False
 
     async def _flush_session_outbound(self, session: Session) -> None:
+        await session.flush_outbound()
+
+    async def _write_session_queues(self, session: Session) -> None:
         while True:
             try:
                 message_id, data = session.unencrypted_queue.get_nowait()
@@ -357,16 +468,13 @@ class Client:
 
     async def _worker_loop_send(self) -> None:
         while True:
-            try:
-                await asyncio.wait_for(self.message_available.wait(), 0.1)
-            except TimeoutError:
-                pass
-
-            for session in self._outbound_sessions():
-                await self._flush_session_outbound(session)
-
-            if not self._has_pending_outbound():
-                self.message_available.clear()
+            while self._has_pending_outbound():
+                for session in self._outbound_sessions():
+                    await self._flush_session_outbound(session)
+            self.message_available.clear()
+            if self._has_pending_outbound():
+                continue
+            await self.message_available.wait()
 
     async def _timer_task(self) -> None:
         try:
@@ -422,14 +530,22 @@ class Client:
     ) -> TaskiqResult[str]:
         start_time = time.perf_counter()
         result = None
+        ack_timeout, result_timeout = _task_result_timeouts(method_name)
 
         try:
-            result = await task.wait_result(timeout=1.5)
+            result = await task.wait_result(timeout=ack_timeout)
             return result
-        except TaskiqResultTimeoutError as e:
-            logger.opt(exception=e).warning(f"Task timeout exceeded, sending ack to message {message_id}")
+        except TaskiqResultTimeoutError:
+            logger.warning(
+                "Task {method} ({message_id}) still running after {ack_timeout}s, sending MsgsAck "
+                "(will wait up to {result_timeout}s more)",
+                method=method_name,
+                message_id=message_id,
+                ack_timeout=ack_timeout,
+                result_timeout=result_timeout,
+            )
             await session.enqueue(MsgsAck(msg_ids=[message_id]), False)
-            result = await task.wait_result(timeout=15)
+            result = await task.wait_result(timeout=result_timeout)
             return result
         finally:
             end_time = time.perf_counter()
@@ -444,6 +560,16 @@ class Client:
     async def _process_request(self, request: Message, session: Session) -> RpcResult | None:
         if request.obj.tlid() in SYSTEM_HANDLERS:
             return await SYSTEM_HANDLERS[request.obj.tlid()](self, request, session)
+
+        auth_key_id = cast(int, session.auth_data.auth_key_id)
+        match await self._auth_gate(auth_key_id, request.obj):
+            case "drop":
+                return None
+            case "unregistered":
+                await self._respond_auth_key_unregistered(request.message_id, session, auth_key_id)
+                raise Disconnection(404)
+            case "ok":
+                pass
 
         with measure_time("\"execute task\""):
             with measure_time("_kiq()"):
@@ -488,5 +614,9 @@ class Client:
         return result.obj
 
     async def propagate(self, request: Message, session: Session) -> RpcResult | None:
-        if (result := await self._process_request(request, session)) is not None:
-            await session.enqueue(result, True)
+        try:
+            if (result := await self._process_request(request, session)) is not None:
+                await session.enqueue(result, True)
+            return result
+        finally:
+            await session.mark_rpc_completed(request.message_id)

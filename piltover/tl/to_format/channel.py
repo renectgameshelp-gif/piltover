@@ -6,6 +6,14 @@ from piltover.tl.serialization_context import EMPTY_SERIALIZATION_CONTEXT, Seria
 
 
 class ChannelToFormat(types.ChannelToFormatInternal):
+    __slots__ = ("forum", "call_active", "call_not_empty")
+
+    def __init__(self, *, forum: bool = False, call_active: bool = False, call_not_empty: bool = False, **kwargs):
+        super().__init__(**kwargs)
+        self.forum = forum
+        self.call_active = call_active
+        self.call_not_empty = call_not_empty
+
     def _forbidden(self, access_hash: int = -1) -> types.ChannelForbidden:
         from piltover.db.models import Channel
 
@@ -59,6 +67,9 @@ class ChannelToFormat(types.ChannelToFormatInternal):
             noforwards=self.noforwards,
             join_to_send=self.join_to_send,
             join_request=self.join_request,
+            forum=self.forum,
+            call_active=self.call_active,
+            call_not_empty=self.call_not_empty,
             stories_hidden=False,
             stories_hidden_min=True,
             stories_unavailable=True,

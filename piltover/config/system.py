@@ -18,6 +18,15 @@ class _TracingConfig(BaseModel):
     zipkin_address: str | None = None
 
 
+class _GroupCallSfuConfig(BaseModel):
+    enabled: bool = False
+    api_url: str = "http://127.0.0.1:3200"
+    callback_host: str = "127.0.0.1"
+    callback_port: int = 4431
+    public_ip: str = "127.0.0.1"
+    rtc_port: int = 10000
+
+
 class _System(BaseModel):
     data_dir: Path = Path("data")
     database_connection_string: str = "sqlite://data/secrets/piltover.db"
@@ -25,6 +34,7 @@ class _System(BaseModel):
     redis_address: str | None = None
     cache: _CacheConfig
     debug_tracing: _TracingConfig
+    group_call_sfu: _GroupCallSfuConfig = _GroupCallSfuConfig()
     debug_enable_aiomonitor: bool = False
     enable_system_bot: bool = False
 

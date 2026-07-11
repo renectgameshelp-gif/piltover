@@ -137,9 +137,9 @@ async def delete_photos(request: DeletePhotos, user: User) -> list[int]:
         await UserPhoto.filter(id__in=actual_ids).delete()
 
         if need_new_current:
-            await UserPhoto.filter(id=Subquery(
-                UserPhoto.filter(user=user).order_by("-id").first().values_list("id", flat=True)
-            )).update(current=True)
+            new_current_id = await UserPhoto.filter(user=user).order_by("-id").first().values_list("id", flat=True)
+            if new_current_id is not None:
+                await UserPhoto.filter(id=new_current_id).update(current=True)
             user.version += 1
             await user.save(update_fields=["version"])
 

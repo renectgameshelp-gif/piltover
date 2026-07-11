@@ -1,3 +1,0 @@
-[worker]
-# Path to public key file. Default is <data_dir>/secrets/pubkey.asc
-#pubkey_file = "/path/to/public/key.pem"

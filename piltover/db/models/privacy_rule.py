@@ -104,11 +104,9 @@ class PrivacyRule(Model):
             })
 
             if all_users:
-                await models.PrivacyRuleException.filter(id__in=Subquery(
-                    models.PrivacyRuleException.filter(
-                        rule=rule, user_id__not_in=all_users,
-                    ).values_list("id", flat=True)
-                )).delete()
+                await models.PrivacyRuleException.filter(
+                    rule=rule, user_id__not_in=all_users,
+                ).delete()
 
                 existing = {}
                 if not created:

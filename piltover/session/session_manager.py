@@ -34,9 +34,10 @@ class SessionManager:
 
     @classmethod
     def cleanup(cls, session: Session) -> None:
-        uniq_id = cast(int, cast(AuthData, session.auth_data).auth_key_id), session.session_id
-        if uniq_id in cls.sessions:
-            del cls.sessions[uniq_id]
+        if session.auth_data is None or session.auth_data.auth_key_id is None:
+            return
+        uniq_id = session.auth_data.auth_key_id, session.session_id
+        cls.sessions.pop(uniq_id, None)
 
     @classmethod
     async def send(

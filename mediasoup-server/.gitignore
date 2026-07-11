@@ -1,0 +1,4 @@
+node_modules/
+.env
+mediasoup-error.log
+mediasoup-combined.log

@@ -233,6 +233,9 @@ async def bind_temp_auth_key(request: BindTempAuthKey):
     if ctx.perm_auth_key_id is not None:
         raise ErrorRpc(error_code=400, error_message="TEMP_AUTH_KEY_ALREADY_BOUND")
 
+    if await TempAuthKey.get_or_none(id=ctx.auth_key_id, expires_at__gt=int(time())) is None:
+        raise ErrorRpc(error_code=401, error_message="AUTH_KEY_UNREGISTERED")
+
     encrypted_message = cast(EncryptedMessagePacket, MessagePacket.parse(request.encrypted_message))
     if not isinstance(encrypted_message, EncryptedMessagePacket):
         raise ErrorRpc(error_code=400, error_message="ENCRYPTED_MESSAGE_INVALID")
@@ -251,7 +254,7 @@ async def bind_temp_auth_key(request: BindTempAuthKey):
 
     try:
         if perm_auth_key is None:
-            raise Exception
+            raise ErrorRpc(error_code=401, error_message="AUTH_KEY_UNREGISTERED")
 
         message = encrypted_message.decrypt(perm_auth_key, ConnectionRole.CLIENT, True)
         sec_check(message.seq_no == 0)
@@ -263,6 +266,8 @@ async def bind_temp_auth_key(request: BindTempAuthKey):
         sec_check(obj.nonce == request.nonce, msg=f"{obj.nonce} != {request.nonce}")
         sec_check(obj.temp_session_id == ctx.session_id, msg=f"{obj.temp_session_id} != {ctx.session_id}")
         sec_check(obj.temp_auth_key_id == ctx.auth_key_id, msg=f"{obj.temp_auth_key_id} != {ctx.auth_key_id}")
+    except ErrorRpc:
+        raise
     except Exception as e:
         logger.opt(exception=e).debug("Failed to decrypt inner message")
         raise ErrorRpc(error_code=400, error_message="ENCRYPTED_MESSAGE_INVALID")

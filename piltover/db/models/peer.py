@@ -5,6 +5,7 @@ from typing import TypeVar, Generic, TYPE_CHECKING, Literal, TypeGuard, TypeAlia
 
 from pypika_tortoise import Parameter, Dialects
 from tortoise import fields, Model, Tortoise
+from tortoise.exceptions import OperationalError
 from tortoise.expressions import Q
 from tortoise.queryset import QuerySetSingle
 
@@ -127,6 +128,34 @@ class Peer(Model, Generic[OwnerT, UserT, ChatT, ChannelT, OwnerIdT, UserIdT, Cha
         def chat_id(self, value: int | None) -> None: ...
         @channel_id.setter
         def channel_id(self, value: int | None) -> None: ...
+
+    @classmethod
+    async def get_or_create_for_user(
+            cls,
+            owner_id: int,
+            user: models.User | int,
+            *,
+            select_related: tuple[str, ...] = (),
+    ) -> Peer:
+        user_id = user.id if isinstance(user, models.User) else user
+        peer = await cls.get_or_none(owner_id=owner_id, user_id=user_id)
+        if peer is not None:
+            if select_related:
+                return await cls.filter(id=peer.id).select_related(*select_related).first()
+            return peer
+
+        try:
+            peer, _ = await cls.get_or_create(
+                owner_id=owner_id, user_id=user_id, defaults={"type": PeerType.USER},
+            )
+        except OperationalError as exc:
+            if "Duplicate entry" not in str(exc):
+                raise
+            peer = await cls.get(owner_id=owner_id, user_id=user_id)
+
+        if select_related:
+            return await cls.filter(id=peer.id).select_related(*select_related).first()
+        return peer
 
     @staticmethod
     def is_self(peer: Peer) -> TypeGuard[PeerSelfT]:
@@ -280,10 +309,10 @@ class Peer(Model, Generic[OwnerT, UserT, ChatT, ChannelT, OwnerIdT, UserIdT, Cha
             if target is None or (not allow_bot and target.bot):
                 return None
 
-            peer, _ = await cls.get_or_create(
-                owner_id=user_id, user_id=input_peer.user_id, defaults={"type": PeerType.USER},
+            peer = await cls.get_or_create_for_user(
+                user_id, input_peer.user_id, select_related=("owner", "user", *select_related),
             )
-            return await cls.filter(id=peer.id).select_related("owner", "user", *select_related).first()
+            return peer
 
         if isinstance(input_peer, InputPeerChat):
             if peer_types is not None and PeerType.CHAT not in peer_types:
@@ -315,9 +344,7 @@ class Peer(Model, Generic[OwnerT, UserT, ChatT, ChannelT, OwnerIdT, UserIdT, Cha
         if self.type is PeerType.USER:
             if self.user_id == 777000:
                 return []
-            opposite_peer, _ = await Peer.get_or_create(
-                type=PeerType.USER, owner_id=self.user_id, user_id=self.owner_id,
-            )
+            opposite_peer = await Peer.get_or_create_for_user(self.user_id, self.owner_id)
             if opposite_peer.blocked_at is not None and not allow_blocked:
                 return []
             owner_user = await models.User.get(id=self.owner_id)

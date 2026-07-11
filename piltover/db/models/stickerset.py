@@ -4,7 +4,7 @@ import hashlib
 import hmac
 from typing import Generator, cast
 
-from fastrand import xorshift128plus_bytes
+from piltover.utils.fastrand_shim import xorshift128plus_bytes
 from loguru import logger
 from tortoise import Model, fields
 from tortoise.expressions import Q

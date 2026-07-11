@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 
 from loguru import logger
+from lru import LRU
 from taskiq import TaskiqEvents, AsyncBroker
 
 from piltover.gateway.client import Client
@@ -42,6 +43,7 @@ class Gateway:
         self.fingerprint_signed: int = get_public_key_fingerprint(self.server_keys.public_key, True)
 
         self.clients: dict[str, Client] = {}
+        self._unknown_auth_key_ids: LRU[int, None] = LRU(4096)
 
         if salt_key is None:
             salt_key = os.urandom(32)

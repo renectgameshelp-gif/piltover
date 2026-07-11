@@ -5,7 +5,7 @@ from time import time
 from typing import cast, Sequence
 from uuid import UUID
 
-from fastrand import xorshift128plusrandint
+from piltover.utils.fastrand_shim import xorshift128plusrandint
 from loguru import logger
 from tortoise.expressions import Q, F, Subquery
 from tortoise.transactions import in_transaction
@@ -173,6 +173,7 @@ async def send_message_internal(
         user: User, peer: Peer, random_id: int | None, reply_to_message_id: int | None, clear_draft: bool,
         author: User | int, opposite: bool = True, scheduled_date: int | None = None, unhide_dialog: bool = True, *,
         text: str | None = None, entities: list[dict[str, int | str]] | None = None,
+        top_msg_id: int | None = None,
         **message_kwargs
 ) -> Updates:
     """
@@ -196,6 +197,13 @@ async def send_message_internal(
 
     reply_to = None
     reply_to_top = None
+
+    if top_msg_id and peer.type is PeerType.CHANNEL and peer.channel.forum:
+        from piltover.app.utils.forum_topics import resolve_topic_top_message
+        reply_to_top = await resolve_topic_top_message(peer.channel, peer, top_msg_id, user.id)
+        if reply_to_message_id is None:
+            reply_to_message_id = top_msg_id
+
     if reply_to_message_id:
         reply_to = await MessageRef.get_or_none(
             peer=peer, id=reply_to_message_id,
@@ -203,12 +211,29 @@ async def send_message_internal(
         if reply_to is None:
             raise ErrorRpc(error_code=400, error_message="REPLY_TO_INVALID")
         if opposite and peer.type is PeerType.CHANNEL and peer.channel.supergroup:
-            if reply_to.is_discussion:
+            if peer.channel.forum:
+                if reply_to_top is None:
+                    if reply_to.top_message_id is not None:
+                        reply_to_top = reply_to.top_message
+                    else:
+                        from piltover.db.models import ForumTopic
+                        topic = await ForumTopic.get_or_none(
+                            channel=peer.channel, top_message_id=reply_to.id, deleted=False,
+                        )
+                        if topic is not None:
+                            reply_to_top = reply_to
+            elif reply_to.is_discussion:
                 reply_to_top = reply_to
             elif reply_to.top_message is not None:
                 reply_to_top = reply_to.top_message
             elif reply_to.reply_to is not None:
                 reply_to_top = reply_to.reply_to
+
+    if reply_to_top is None and opposite and peer.type is PeerType.CHANNEL and peer.channel.forum:
+        from piltover.app.utils.forum_topics import get_general_topic
+        general = await get_general_topic(peer.channel)
+        if general is not None:
+            reply_to_top = await MessageRef.get(id=general.top_message_id)
 
     mentioned_user_ids = set()
 
@@ -251,9 +276,7 @@ async def send_message_internal(
 
     if reply_to_top is not None and reply_to_top.is_discussion:
         await MessageContent.filter(
-            id__in=Subquery(MessageContent.filter(
-                messagerefs__discussion_id=reply_to_top.id,
-            ).values("id"))
+            messagerefs__discussion_id=reply_to_top.id,
         ).update(replies_version=F("replies_version") + 1)
 
     if schedule:
@@ -343,10 +366,17 @@ def _resolve_reply_id(
         request: SendMessageTypes,
 ) -> int | None:
     if isinstance(request, NEW_REPLY_TYPES) and isinstance(request.reply_to, InputReplyToMessage):
-        return request.reply_to.reply_to_msg_id
+        return request.reply_to.reply_to_msg_id or None
     elif isinstance(request, OLD_REPLY_TYPES) and request.reply_to_msg_id is not None:
         return request.reply_to_msg_id
     return None
+
+
+def _resolve_top_msg_id(request: SendMessageTypes) -> int | None:
+    if isinstance(request, NEW_REPLY_TYPES) and isinstance(request.reply_to, InputReplyToMessage):
+        return request.reply_to.top_msg_id
+    top_msg_id = getattr(request, "top_msg_id", None)
+    return top_msg_id if top_msg_id else None
 
 
 async def _make_channel_post_info_many(
@@ -497,6 +527,7 @@ async def send_message(request: SendMessage, user_id: int):
         raise ErrorRpc(error_code=400, error_message="MESSAGE_TOO_LONG")
 
     reply_to_message_id = _resolve_reply_id(request)
+    top_msg_id = _resolve_top_msg_id(request)
     is_channel_post, post_info, post_signature = await _make_channel_post_info_maybe(peer, user, participant)
     if not is_channel_post:
         is_anonymous, post_signature = _make_supergroup_anonymous_maybe(peer, participant)
@@ -511,6 +542,7 @@ async def send_message(request: SendMessage, user_id: int):
     return await send_message_internal(
         user, peer, request.random_id, reply_to_message_id, request.clear_draft,
         author=user,
+        top_msg_id=top_msg_id,
         text=request.message,
         scheduled_date=request.schedule_date,
         entities=await process_message_entities(request.message, request.entities, user_id),
@@ -1072,6 +1104,7 @@ async def send_media(request: SendMedia | SendMedia_148 | SendMedia_176, user_id
 
     media = await _process_media(user, request.media)
     reply_to_message_id = _resolve_reply_id(request)
+    top_msg_id = _resolve_top_msg_id(request)
     is_channel_post, post_info, post_signature = await _make_channel_post_info_maybe(peer, user, participant)
     if not is_channel_post:
         is_anonymous, post_signature = _make_supergroup_anonymous_maybe(peer, participant)
@@ -1089,7 +1122,7 @@ async def send_media(request: SendMedia | SendMedia_148 | SendMedia_176, user_id
 
     return await send_message_internal(
         user, peer, request.random_id, reply_to_message_id, request.clear_draft, scheduled_date=request.schedule_date,
-        author=user, text=request.message, media=media,
+        author=user, top_msg_id=top_msg_id, text=request.message, media=media,
         entities=await process_message_entities(request.message, request.entities, user_id),
         channel_post=is_channel_post, post_info=post_info, post_author=post_signature, anonymous=is_anonymous,
         reply_markup=reply_markup.write() if reply_markup else None,

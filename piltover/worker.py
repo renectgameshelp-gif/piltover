@@ -223,10 +223,37 @@ class Worker(MessageHandler):
         else:
             return response.write().hex()
 
+    @staticmethod
+    def _log_rpc_request(call: CallRpc) -> None:
+        logger.info(
+            "handle_tl_rpc {method} user={user_id} auth={auth_id} session={session_id} "
+            "msg_id={message_id} request={request!r}",
+            method=call.obj.tlname(),
+            user_id=call.user_id,
+            auth_id=call.auth_id,
+            session_id=call.session_id,
+            message_id=call.message_id,
+            request=call.obj,
+        )
+
+    @staticmethod
+    def _log_handler_error(call: CallRpc, e: ErrorRpc) -> None:
+        reason = f", reason: {e.reason}" if e.reason is not None else ""
+        log = (
+            logger.debug
+            if e.error_code == 401 and e.error_message == "AUTH_KEY_UNREGISTERED"
+            else logger.warning
+        )
+        log(
+            f"{call.obj.tlname()} user={call.user_id}: "
+            f"[{e.error_code} {e.error_message}]{reason} request={call.obj!r}",
+        )
+
     async def _handle_tl_rpc(self, call_hex: str) -> RpcResponse | str:
         with measure_time("read CallRpc"):
             call = CallRpc.read(BytesIO(bytes.fromhex(call_hex)), True)
 
+        self._log_rpc_request(call)
         logger.trace("Got request: {call!r}", call=call)
 
         req_message_id = cast(int, call.message_id)
@@ -270,11 +297,12 @@ class Worker(MessageHandler):
                 # TODO: wrap handler call in in_transaction?
                 result = await handler(call.obj, user, call.user_id)
         except ErrorRpc as e:
-            reason = f", reason: {e.reason}" if e.reason is not None else ""
-            logger.warning(f"{call.obj.tlname()}: [{e.error_code} {e.error_message}]{reason}")
+            self._log_handler_error(call, e)
             result = RpcError(error_code=e.error_code, error_message=e.error_message)
         except Exception as e:
-            logger.opt(exception=e).warning(f"Error while processing {call.obj.tlname()}")
+            logger.opt(exception=e).warning(
+                f"Error while processing {call.obj.tlname()} user={call.user_id} request={call.obj!r}",
+            )
             result = RpcError(error_code=500, error_message="Server error")
         finally:
             request_ctx.reset(ctx_token)
@@ -328,11 +356,12 @@ class Worker(MessageHandler):
                 # TODO: wrap handler call in in_transaction?
                 result = await handler(call.obj, None, None)
         except ErrorRpc as e:
-            reason = f", reason: {e.reason}" if e.reason is not None else ""
-            logger.warning(f"{call.obj.tlname()}: [{e.error_code} {e.error_message}]{reason}")
+            self._log_handler_error(call, e)
             result = RpcError(error_code=e.error_code, error_message=e.error_message)
         except Exception as e:
-            logger.opt(exception=e).warning(f"Error while processing {call.obj.tlname()}")
+            logger.opt(exception=e).warning(
+                f"Error while processing {call.obj.tlname()} user={call.user_id} request={call.obj!r}",
+            )
             result = RpcError(error_code=500, error_message="Server error")
         finally:
             request_ctx.reset(ctx_token)

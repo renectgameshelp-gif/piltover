@@ -2,11 +2,10 @@ from time import time
 from typing import cast
 from uuid import UUID
 
-import magic
 from loguru import logger
 from tortoise.expressions import Q
 
-from piltover.app.utils.utils import PHOTOSIZE_TO_INT, MIME_TO_TL
+from piltover.app.utils.utils import PHOTOSIZE_TO_INT, MIME_TO_TL, detect_buffer_mime
 from piltover.context import request_ctx
 from piltover.db.enums import PeerType, FileType
 from piltover.db.models import UploadingFile, UploadingFilePart, File, Peer, Stickerset
@@ -32,9 +31,7 @@ async def save_file_part(request: SaveFilePart | SaveBigFilePart, user_id: int) 
 
     mime = None
     if request.file_part == 0 and request.bytes_:
-        mime = magic.from_buffer(request.bytes_[:4096], mime=True)
-        if mime == "application/octet-stream":
-            mime = None
+        mime = detect_buffer_mime(request.bytes_)
         defaults["mime"] = mime
         logger.trace(f"Resolved file mime type from first part: {mime!r}")
 

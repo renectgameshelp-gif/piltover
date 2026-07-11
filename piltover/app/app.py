@@ -9,7 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import AsyncIterator
 
-import uvloop
+import sys
+
 from loguru import logger
 from taskiq import TaskiqScheduler, InMemoryBroker
 from tortoise import Tortoise, connections
@@ -165,6 +166,19 @@ class PiltoverApp:
             loop = asyncio.get_running_loop()
             monitor = aiomonitor.start_monitor(loop)
 
+        sfu = SYSTEM_CONFIG.group_call_sfu
+        if sfu.enabled:
+            from piltover.app.utils.sfu_callback_server import start_sfu_callback_server
+            try:
+                await start_sfu_callback_server(sfu.callback_host, sfu.callback_port)
+            except OSError as exc:
+                logger.error(
+                    "SFU speaking callback server failed on {}:{} — speaking indicator will not work: {}",
+                    sfu.callback_host,
+                    sfu.callback_port,
+                    exc,
+                )
+
         await self._gateway.serve()
         if scheduler_task is not None:
             await scheduler_task
@@ -312,6 +326,10 @@ if __name__ == "__main__":
         patch_queryset_for_measurement()
 
     try:
-        uvloop.run(app.run())
+        if sys.platform == "win32":
+            asyncio.run(app.run())
+        else:
+            import uvloop
+            uvloop.run(app.run())
     except KeyboardInterrupt:
         pass

@@ -137,9 +137,11 @@ async def update_username(request: UpdateUsername, user_id: int) -> bool:
 
 async def _create_channel(
         creator_id: int, title: str, description: str | None, is_channel: bool, is_supergroup: bool,
+        is_forum: bool = False,
 ) -> tuple[Channel, Peer]:
     channel = await Channel.create(
         creator_id=creator_id, name=title, description=description, channel=is_channel, supergroup=is_supergroup,
+        forum=is_forum and is_supergroup,
     )
     peer_channel: Peer = await Peer.create(owner=None, channel=channel, type=PeerType.CHANNEL)
 
@@ -180,9 +182,19 @@ async def create_channel(request: CreateChannel, user_id: int) -> Updates:
     if len(description) > 255:
         raise ErrorRpc(error_code=400, error_message="CHAT_ABOUT_TOO_LONG")
 
+    is_forum = getattr(request, "forum", False)
+    if is_forum and request.broadcast:
+        raise ErrorRpc(error_code=400, error_message="CHANNEL_INVALID")
+
     async with in_transaction():
-        channel, peer_channel = await _create_channel(user_id, title, description, request.broadcast, request.megagroup)
+        channel, peer_channel = await _create_channel(
+            user_id, title, description, request.broadcast, request.megagroup, is_forum=is_forum,
+        )
         await _add_user_to_channel(channel, peer_channel, user_id)
+
+    if channel.forum:
+        from piltover.app.utils.forum_topics import ensure_general_topic
+        await ensure_general_topic(channel, peer_channel, user_id)
 
     user = await User.get(id=user_id).only("id")
     user.bot = False
@@ -366,6 +378,10 @@ async def get_full_channel(request: GetFullChannel, user_id: int) -> MessagesCha
             default_send_as = PeerChannel(channel_id=default_send_as_channel.channel.make_id())
             channels_to_tl.append(default_send_as_channel.channel)
 
+    from piltover.app.utils.group_calls import get_active_group_call, input_group_call_for_full, get_default_join_as_peer
+    active_group_call = await get_active_group_call(channel)
+    groupcall_default_join_as = await get_default_join_as_peer(user_id, channel)
+
     return MessagesChatFull(
         full_chat=ChannelFull(
             can_view_participants=can_view_participants,
@@ -419,6 +435,8 @@ async def get_full_channel(request: GetFullChannel, user_id: int) -> MessagesCha
             slowmode_seconds=channel.slowmode_seconds,
             slowmode_next_send_date=slowmode_next_date,
             default_send_as=default_send_as,
+            call=input_group_call_for_full(active_group_call),
+            groupcall_default_join_as=groupcall_default_join_as,
             stickerset=await channel.stickerset.to_tl(user_id) if channel.stickerset is not None else None,
             emojiset=await channel.emojiset.to_tl(user_id) if channel.emojiset is not None else None,
             wallpaper=channel.wallpaper.to_tl() if channel.wallpaper is not None else None,
@@ -644,9 +662,7 @@ async def edit_banned(request: EditBanned, user_id: int) -> Updates:
         await channel.sync_admins_count(False)
 
     if new_banned_rights & ChatBannedRights.VIEW_MESSAGES:
-        await ChatInviteRequest.filter(id__in=Subquery(
-            ChatInviteRequest.filter(user_id=target_id, invite__channel=channel).values_list("id", flat=True)
-        )).delete()
+        await ChatInviteRequest.delete_for_channel(channel, user_id=target_id)
 
     await AdminLogEntry.create(
         channel=channel,
@@ -774,7 +790,9 @@ async def get_participants(request: GetParticipants, user_id: int) -> ChannelPar
         if filt.top_msg_id:
             query = query.filter(user_id__in=Subquery(
                 MessageRef.filter(
-                    peer__channel=channel, content__reply_to_id=filt.top_msg_id,
+                    peer__channel=channel,
+                ).filter(
+                    Q(top_message_id=filt.top_msg_id) | Q(id=filt.top_msg_id),
                 ).distinct().values_list("content__author_id", flat=True)
             ))
     elif isinstance(filt, ChannelParticipantsBanned):
@@ -883,7 +901,9 @@ async def read_channel_history(request: ReadHistory, user_id: int) -> bool:
 
     unread_max_id, content_id = unread_ids
 
-    unread_count = await MessageRef.filter(peer=peer, id__gt=unread_max_id).count()
+    unread_count = await MessageRef.filter(
+        peer=peer, id__gt=unread_max_id, content__author_id__not=user_id,
+    ).count()
 
     read_state.last_message_id = unread_max_id
     await read_state.save(update_fields=["last_message_id"])
@@ -974,11 +994,7 @@ async def invite_to_channel(request: InviteToChannel, user_id: int) -> InvitedUs
         await ChatParticipant.bulk_create(participants_to_create, ignore_conflicts=True)
     if participants_to_update:
         await ChatParticipant.bulk_update(participants_to_update, fields=["left"])
-    await ChatInviteRequest.filter(id__in=Subquery(
-        ChatInviteRequest.filter(
-            user_id__in=added_user_ids, invite__channel=channel,
-        ).values_list("id", flat=True)
-    )).delete()
+    await ChatInviteRequest.delete_for_channel(channel, user_id__in=added_user_ids)
 
     await SessionManager.subscribe_to_channel(channel.id, added_user_ids)
 
@@ -1233,9 +1249,11 @@ async def leave_channel(request: LeaveChannel, user_id: int) -> Updates:
         await participant.save(update_fields=["left"])
         await ChatInvite.filter(channel=peer.channel, user_id=user_id).update(revoked=True)
         await Dialog.hide(user_id, peer)
-        await MessageContent.filter(id__in=Subquery(
-            MessageRef.filter(peer=peer, scheduled_by_user_id=user_id).values_list("content_id", flat=True)
-        )).delete()
+        scheduled_content_ids = list(await MessageRef.filter(
+            peer=peer, scheduled_by_user_id=user_id,
+        ).values_list("content_id", flat=True))
+        if scheduled_content_ids:
+            await MessageContent.filter(id__in=scheduled_content_ids).delete()
         await AdminLogEntry.create(
             channel=peer.channel,
             user_id=user_id,
@@ -1307,10 +1325,7 @@ async def toggle_join_to_send(request: ToggleJoinToSend, user_id: int) -> Update
     if channel is None:
         raise ErrorRpc(error_code=406, error_message="CHANNEL_PRIVATE")
 
-    if not request.enabled and not channel.is_discussion:
-        # As per https://core.telegram.org/constructor/channel,
-        # "Whether a user needs to join the supergroup before they can send messages:
-        # can be false only for discussion groups"
+    if not channel.is_discussion:
         raise ErrorRpc(error_code=400, error_message="CHANNEL_INVALID")
 
     if channel.join_to_send == request.enabled:
@@ -1457,7 +1472,7 @@ async def toggle_join_request(request: ToggleJoinRequest, user_id: int) -> Updat
 
     channel.join_request = request.enabled
     channel.version += 1
-    await channel.save(update_fields=["join_to_send", "version"])
+    await channel.save(update_fields=["join_request", "version"])
 
     return await upd.update_channel(channel)
 
@@ -1911,3 +1926,7 @@ async def set_stickers(request: SetStickers | SetEmojiStickers, user_id: int) ->
 #     await channel.save(update_fields=["participants_hidden", "version"])
 #
 #     return await upd.update_channel(channel, user)
+
+
+from piltover.app.handlers import forum_topics as forum_topics_handlers
+handler.register_handler(forum_topics_handlers.handler)

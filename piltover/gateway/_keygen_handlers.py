@@ -16,8 +16,8 @@ from piltover.auth_data import GenAuthData
 from piltover.db.models import TempAuthKey, AuthKey
 from piltover.exceptions import Disconnection
 from piltover.tl import MsgsAck, ReqPqMulti, ReqPq, ReqDHParams, SetClientDHParams, ResPQ, PQInnerData, PQInnerDataDc, \
-    PQInnerDataTemp, PQInnerDataTempDc, ServerDHInnerData, ServerDHParamsOk, ClientDHInnerData, DhGenOk, Int256, Long, \
-    Int128, TLObject
+    PQInnerDataTemp, PQInnerDataTempDc, ServerDHInnerData, ServerDHParamsOk, ClientDHInnerData, DhGenOk, DhGenFail, \
+    Int256, Long, Int128, TLObject
 from piltover.utils import gen_safe_prime
 from piltover.utils.rsa_utils import rsa_decrypt, rsa_pad_inverse
 
@@ -210,24 +210,37 @@ async def set_client_dh_params(client: Client, set_client_DH_params: SetClientDH
 
     auth_key_hash = auth_key_digest[-8:]
     auth_key_aux_hash = auth_key_digest[:8]
+    auth_data.auth_key_id = Long.read_bytes(auth_key_hash)
+
+    auth_key_id = auth_data.auth_key_id
+    auth_key = auth_data.auth_key
+    expires_in = auth_data.expires_in
+
+    try:
+        if expires_in:
+            await TempAuthKey.create_key(
+                id=auth_key_id, auth_key=auth_key, expires_at=int(time() + expires_in),
+            )
+        else:
+            await AuthKey.create_key(id=auth_key_id, auth_key=auth_key)
+    except Exception as e:
+        logger.opt(exception=e).error("Failed to persist auth key {auth_key_id}", auth_key_id=auth_key_id)
+        await client.send_unencrypted(DhGenFail(
+            nonce=client_DH_inner_data.nonce,
+            server_nonce=auth_data.server_nonce,
+            new_nonce_hash3=Int128.read_bytes(
+                hashlib.sha1(auth_data.new_nonce + b"\x03" + auth_key_aux_hash).digest()[-16:]
+            ),
+        ))
+        raise Disconnection(404)
 
     await client.send_unencrypted(DhGenOk(
         nonce=client_DH_inner_data.nonce,
         server_nonce=auth_data.server_nonce,
         new_nonce_hash1=Int128.read_bytes(
             hashlib.sha1(auth_data.new_nonce + b"\x01" + auth_key_aux_hash).digest()[-16:]
-        )
+        ),
     ))
-
-    auth_data.auth_key_id = Long.read_bytes(auth_key_hash)
-
-    auth_key_id = auth_data.auth_key_id
-    auth_key = auth_data.auth_key
-    expires_in = auth_data.expires_in
-    if expires_in:
-        await TempAuthKey.create(id=auth_key_id, auth_key=auth_key, expires_at=int(time() + expires_in))
-    else:
-        await AuthKey.create(id=auth_key_id, auth_key=auth_key)
 
     logger.info("Auth key generation successfully completed!")
 

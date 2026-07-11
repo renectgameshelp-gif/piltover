@@ -78,6 +78,8 @@ class Channel(ChatBase):
     profile_emoji: models.File | None = NullableFKSetNullR("models.File", "channel_profile_emoji")
     slowmode_seconds: int | None = fields.IntField(null=True, default=None)
     participants_hidden: bool = fields.BooleanField(default=False)
+    forum: bool = fields.BooleanField(default=False)
+    next_topic_id: int = fields.IntField(default=2)
     stickerset: models.Stickerset | None = NullableFKSetNullR("models.Stickerset", "channel_stickers")
     emojiset: models.Stickerset | None = NullableFKSetNullR("models.Stickerset", "channel_emojis")
     wallpaper: models.Wallpaper | None = NullableFKSetNull("models.Wallpaper")
@@ -172,6 +174,23 @@ class Channel(ChatBase):
                 if channel.photo_id is not None and isinstance(channel.photo, models.File):
                     photos[channel.id] = channel.photo
 
+        active_calls = {
+            call.channel_id: call
+            for call in await models.GroupCall.filter(
+                channel_id__in=[channel.id for channel in processing_channels],
+                discarded_at__isnull=True,
+                started_at__not_isnull=True,
+            )
+        }
+        calls_with_participants: set[int] = set()
+        if active_calls:
+            calls_with_participants = set(
+                await models.GroupCallParticipant.filter(
+                    group_call_id__in=[call.id for call in active_calls.values()],
+                    left=False,
+                ).values_list("group_call__channel_id", flat=True),
+            )
+
         tl = []
         to_cache = []
         for channel, cached in zip(channels, cached_channels):
@@ -207,8 +226,11 @@ class Channel(ChatBase):
                 has_link=channel.discussion_id is not None or channel.is_discussion,
                 slowmode_enabled=channel.slowmode_seconds is not None,
                 noforwards=channel.no_forwards,
-                join_to_send=channel.supergroup and channel.join_to_send,
+                join_to_send=channel.is_discussion and channel.join_to_send,
                 join_request=channel.join_request,
+                forum=channel.forum,
+                call_active=channel.id in active_calls,
+                call_not_empty=channel.id in calls_with_participants,
                 username=usernames.get(channel.id),
                 default_banned_rights=channel.banned_rights.to_tl(),
                 color=accent_color,

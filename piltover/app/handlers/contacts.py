@@ -160,7 +160,7 @@ async def contacts_search(request: Search, user_id: int) -> Found:
         await Peer.bulk_create([
             Peer(owner_id=user_id, type=PeerType.USER, user=result_user)
             for result_user in users_by_id.values()
-        ])
+        ], ignore_conflicts=True)
 
     return Found(
         my_results=[],

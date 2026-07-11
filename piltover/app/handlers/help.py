@@ -5,16 +5,17 @@ from time import time
 from piltover.app.utils.utils import telegram_hash
 from piltover.cache import Cache
 from piltover.config import APP_CONFIG, DICE_CONFIG
-from piltover.db.models import AuthCountry, UserReactionsSettings, PeerColorOption
+from piltover.db.models import AuthCountry, UserReactionsSettings, PeerColorOption, User
 from piltover.enums import ReqHandlerFlags
 from piltover.tl import Config, DcOption, NearestDc, JsonObject, PremiumSubscriptionOption, JsonNumber, \
     JsonObjectValue, JsonBool, JsonArray, JsonString, ReactionEmoji, ReactionCustomEmoji
 from piltover.tl.functions.help import GetConfig, GetAppConfig, GetNearestDc, GetCountriesList, \
     GetTermsOfServiceUpdate, GetPromoData, GetPremiumPromo, SaveAppLog, GetInviteText, GetPeerColors, \
-    GetPeerProfileColors, DismissSuggestion, GetTimezonesList, AcceptTermsOfService, HidePromoData, GetRecentMeUrls
+    GetPeerProfileColors, DismissSuggestion, GetTimezonesList, AcceptTermsOfService, HidePromoData, GetRecentMeUrls, \
+    GetSupport, GetSupportName
 from piltover.tl.types.help import CountriesList, PromoDataEmpty, PremiumPromo, InviteText, TermsOfServiceUpdateEmpty, \
     PeerColors, PeerColorOption as TLPeerColorOption, AppConfig as TLAppConfig, CountriesListNotModified, \
-    AppConfigNotModified, PeerColorsNotModified, TimezonesList, RecentMeUrls
+    AppConfigNotModified, PeerColorsNotModified, TimezonesList, RecentMeUrls, Support, SupportName
 from piltover.worker import MessageHandler
 
 handler = MessageHandler("help")
@@ -86,6 +87,22 @@ async def get_nearest_dc():  # pragma: no cover
         this_dc=APP_CONFIG.this_dc,
         nearest_dc=APP_CONFIG.this_dc,
     )
+
+
+@handler.on_request(GetSupport, ReqHandlerFlags.BOT_NOT_ALLOWED)
+async def get_support() -> Support:
+    support_user = await User.get_or_none(id=777000, system=True)
+    if support_user is None:
+        support_user = await User.get(id=777000)
+    return Support(
+        phone_number=support_user.phone_number or "",
+        user=await support_user.to_tl(),
+    )
+
+
+@handler.on_request(GetSupportName, ReqHandlerFlags.AUTH_NOT_REQUIRED)
+async def get_support_name() -> SupportName:
+    return SupportName(name=APP_CONFIG.name)
 
 
 APP_CONFIG_HASH = int(time())

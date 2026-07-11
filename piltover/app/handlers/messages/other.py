@@ -1,8 +1,12 @@
-from fastrand import xorshift128plus_bytes
+import asyncio
+
+from piltover.utils.fastrand_shim import xorshift128plus_bytes
 
 import piltover.app.utils.updates_manager as upd
 from piltover.app.handlers.messages.sending import process_send_as
-from piltover.db.models import User, Peer, Presence, ChatParticipant, DefaultSendAs, Channel
+from piltover.app.utils.group_calls import notify_group_call_speaking, resolve_group_call_for_speaking
+from piltover.db.models import User, Peer, Presence, ChatParticipant, DefaultSendAs, Channel, Chat
+from piltover.tl.types import SpeakingInGroupCallAction
 from piltover.enums import ReqHandlerFlags
 from piltover.exceptions import ErrorRpc
 from piltover.session import SessionManager
@@ -21,6 +25,15 @@ handler = MessageHandler("messages.other")
 async def set_typing(request: SetTyping, user: User):
     # TODO: dont fetch peer?
     peer = await Peer.from_input_peer_raise(user, request.peer)
+
+    if isinstance(request.action, SpeakingInGroupCallAction):
+        resolved = await resolve_group_call_for_speaking(user.id, peer)
+        if resolved is not None:
+            chat_or_channel, group_call = resolved
+            await notify_group_call_speaking(user.id, chat_or_channel, group_call)
+            if not user.bot:
+                asyncio.create_task(Presence.update_to_now(user))
+            return True
 
     if Peer.is_self(peer) or (Peer.is_channel(peer) and not peer.channel.supergroup):
         return True

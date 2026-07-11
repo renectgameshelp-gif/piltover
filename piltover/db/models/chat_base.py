@@ -234,7 +234,7 @@ class ChatBase(Model):
             return False
         if isinstance(self, models.Chat) and participant is None:
             return False
-        if isinstance(self, models.Channel) and participant is None and not self.join_to_send:
+        if isinstance(self, models.Channel) and participant is None and self.is_discussion and self.join_to_send:
             return False
         return True
 

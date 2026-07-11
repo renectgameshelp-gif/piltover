@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import hmac
 from asyncio import Queue, Event
+from collections import deque
+from copy import deepcopy
 from time import time
 from typing import cast, TYPE_CHECKING
 
@@ -45,13 +47,17 @@ class MsgIdValues:
         self.offset = offset
 
 
+_RPC_COMPLETION_TRACK_LIMIT = 256
+
+
 # TODO: store sessions in redis or something (with non-acked messages) to be able to restore session after reconnect
 class Session:
     __slots__ = (
         "client", "session_id", "auth_data", "min_msg_id", "user_id", "auth_id", "channel_ids", "auth_loaded_at",
         "channels_loaded_at", "salt_now", "salt_prev", "no_updates", "layer", "is_bot", "mfa_pending", "msg_id_values",
         "out_seq_no", "message_queue", "unencrypted_queue", "message_available", "is_internal_push",
-        "had_init_connection", "_enqueue_lock",
+        "had_init_connection", "_enqueue_lock", "_rpc_completion_lock", "_rpc_completions", "_rpc_completed_ids",
+        "_rpc_completed_order", "_upd_seq", "_flush_task", "_outbound_flush_lock",
     )
 
     def __init__(self, session_id: int, client: Client | None = None, auth_data: AuthData | None = None) -> None:
@@ -85,6 +91,14 @@ class Session:
         self.message_available: Event | None = None
         self._enqueue_lock = asyncio.Lock()
 
+        self._rpc_completion_lock = asyncio.Lock()
+        self._rpc_completions: dict[int, Event] = {}
+        self._rpc_completed_ids: set[int] = set()
+        self._rpc_completed_order: deque[int] = deque()
+        self._upd_seq: int | None = None
+        self._flush_task: asyncio.Task | None = None
+        self._outbound_flush_lock = asyncio.Lock()
+
         # TODO: store request states (i.e. received, processing, acked, etc.)
         # TODO: store whole session in redis or something
 
@@ -109,9 +123,47 @@ class Session:
         self.client = None
         self.message_available = None
         self.had_init_connection = False
+        self._rpc_completions.clear()
+        self._rpc_completed_ids.clear()
+        self._rpc_completed_order.clear()
+        self._upd_seq = None
+        if self._flush_task is not None and not self._flush_task.done():
+            self._flush_task.cancel()
+        self._flush_task = None
         # TODO: clear message_queue
         piltover.session.SessionManager.broker.unsubscribe(self)
         piltover.session.SessionManager.cleanup(self)
+
+    def _prune_rpc_completions(self) -> None:
+        while len(self._rpc_completed_ids) > _RPC_COMPLETION_TRACK_LIMIT:
+            oldest = self._rpc_completed_order.popleft()
+            self._rpc_completed_ids.discard(oldest)
+            self._rpc_completions.pop(oldest, None)
+
+    async def mark_rpc_completed(self, msg_id: int) -> None:
+        async with self._rpc_completion_lock:
+            if msg_id not in self._rpc_completed_ids:
+                self._rpc_completed_ids.add(msg_id)
+                self._rpc_completed_order.append(msg_id)
+                self._prune_rpc_completions()
+
+            if event := self._rpc_completions.get(msg_id):
+                event.set()
+
+    async def wait_for_rpc(self, msg_id: int, timeout: float) -> bool:
+        async with self._rpc_completion_lock:
+            if msg_id in self._rpc_completed_ids:
+                return True
+            event = self._rpc_completions.get(msg_id)
+            if event is None:
+                event = Event()
+                self._rpc_completions[msg_id] = event
+
+        try:
+            await asyncio.wait_for(event.wait(), timeout)
+            return True
+        except TimeoutError:
+            return False
 
     @staticmethod
     def _get_attr_or_element(obj: TLObject | list, field_name: str) -> TLObject | list:
@@ -120,13 +172,27 @@ class Session:
         else:
             return getattr(obj, field_name)
 
+    @staticmethod
+    async def _persist_upd_seq(auth_id: int, seq: int) -> None:
+        await UserAuthorization.filter(id=auth_id).update(upd_seq=seq)
+
+    async def _next_upd_seq(self) -> int:
+        if self.auth_id is None:
+            return 0
+        if self._upd_seq is None:
+            self._upd_seq = await UserAuthorization.filter(id=self.auth_id).values_list("upd_seq", flat=True)
+            if self._upd_seq is None:
+                self._upd_seq = 0
+        self._upd_seq += 1
+        seq = self._upd_seq
+        asyncio.create_task(self._persist_upd_seq(self.auth_id, seq))
+        return seq
+
     async def enqueue_unencrypted(self, obj: TLObject, in_reply: bool = True) -> None:
         if self.client is None:
             return
 
         async with self._enqueue_lock:
-            await asyncio.sleep(0)
-
             message_id = self.msg_id(in_reply=in_reply)
             logger.debug(
                 "Queueing unencrypted message {message_id} to {session_id}: {message!r}",
@@ -137,45 +203,62 @@ class Session:
             if self.message_available is not None:
                 self.message_available.set()
 
+    def _prepare_outbound_obj(self, obj: TLObject) -> TLObject:
+        obj = deepcopy(obj)
+        if isinstance(obj, ObjectWithLayerRequirement):
+            field_paths = obj.fields
+            obj = obj.object
+
+            for field_path in field_paths:
+                if field_path.min_layer <= self.layer <= field_path.max_layer:
+                    continue
+
+                field_path = field_path.field.split(".")
+                parent = obj
+                for field_name in field_path[:-1]:
+                    parent = self._get_attr_or_element(parent, field_name)
+
+                if not isinstance(parent, list):
+                    continue
+
+                del parent[int(field_path[-1])]
+
+        return obj
+
+    async def flush_outbound(self) -> None:
+        async with self._outbound_flush_lock:
+            client = self.client
+            if client is None:
+                return
+            await client._write_session_queues(self)
+
+    async def _flush_outbound_once(self) -> None:
+        await self.flush_outbound()
+        if self.message_queue.qsize() > 0:
+            self._schedule_outbound_flush()
+
+    def _schedule_outbound_flush(self) -> None:
+        if self.client is None:
+            return
+        if self._flush_task is not None and not self._flush_task.done():
+            return
+        self._flush_task = asyncio.create_task(self._flush_outbound_once())
+
     async def enqueue(self, obj: TLObject, in_reply: bool) -> None:
         if self.client is None:
             return
 
         async with self._enqueue_lock:
-            await asyncio.sleep(0)
-
-            if isinstance(obj, ObjectWithLayerRequirement):
-                field_paths = obj.fields
-                obj = obj.object
-
-                for field_path in field_paths:
-                    if field_path.min_layer <= self.layer <= field_path.max_layer:
-                        continue
-
-                    field_path = field_path.field.split(".")
-                    parent = obj
-                    for field_name in field_path[:-1]:
-                        parent = self._get_attr_or_element(parent, field_name)
-
-                    if not isinstance(parent, list):
-                        continue
-
-                    del parent[int(field_path[-1])]
-
+            obj = self._prepare_outbound_obj(obj)
             context_values = None
             if isinstance(obj, NeedsContextValues):
                 with measure_time("._resolve_context_values(...)"):
                     context_values = await self._resolve_context_values(obj)
                 obj = obj.obj
 
-            # TODO: use *ToFormat?
             if isinstance(obj, Updates) and self.auth_id is not None:
-                await UserAuthorization.filter(id=self.auth_id).update(upd_seq=F("upd_seq") + 1)
-                upd_seq = await UserAuthorization.get_or_none(id=self.auth_id).values_list("upd_seq", flat=True)
-                if upd_seq is None:
-                    upd_seq = 0
-                logger.trace(f"setting seq to {upd_seq} for user {self.user_id}, auth {self.auth_id}")
-                obj.seq = upd_seq
+                obj.seq = await self._next_upd_seq()
+                logger.trace(f"setting seq to {obj.seq} for user {self.user_id}, auth {self.auth_id}")
 
             with measure_time("session.pack_message(...)"):
                 message = self.pack_message(obj, in_reply)
@@ -183,16 +266,6 @@ class Session:
             logger.debug(
                 "Queueing message {message_id} to {session_id}: {message!r}",
                 message_id=message.message_id, session_id=self.session_id, message=message,
-            )
-            logger.debug(
-                (
-                    "SerializationContext: "
-                    "user_id={user_id}, "
-                    "auth_id={auth_id}, "
-                    "layer={layer}, "
-                    "context_values={context_values}"
-                ),
-                user_id=self.user_id, auth_id=self.auth_id, layer=self.layer, context_values=context_values,
             )
 
             with measure_time("<serialize message>"):
@@ -202,15 +275,20 @@ class Session:
                     layer=self.layer,
                     values=context_values,
                 )
-                # TODO: serialize in a different thread
-                self.message_queue.put_nowait((message.message_id, message.seq_no, message.obj.write(ctx)))
+                data = message.obj.write(ctx)
 
-            if self.message_available is not None:
-                self.message_available.set()
+            self.message_queue.put_nowait((message.message_id, message.seq_no, data))
 
             if isinstance(obj, Updates):
                 obj.seq = 0
                 obj.qts = 0
+
+        if self.message_available is not None:
+            self.message_available.set()
+        if in_reply:
+            await self.flush_outbound()
+        else:
+            self._schedule_outbound_flush()
 
     @staticmethod
     def make_salt(salt_key: bytes, auth_key_id: int, timestamp: int) -> bytes:
@@ -219,7 +297,8 @@ class Session:
     # TODO: store salt_key in session?
     def update_salts_maybe(self, salt_key: bytes, force: bool = False) -> None:
         if self.auth_data is None or self.auth_data.auth_key_id is None:
-            self.salt_now = self.salt_prev = (b"\x00" * 8, 0)
+            self.salt_now = Salt(b"\x00" * 8, 0)
+            self.salt_prev = Salt(b"\x00" * 8, 0)
             return
 
         now = int(time() // (30 * 60))
@@ -230,7 +309,7 @@ class Session:
         self.salt_now.valid_at = now
 
         self.salt_prev.salt = self.make_salt(salt_key, self.auth_data.auth_key_id, now - 1)
-        self.salt_now.valid_at = now - 1
+        self.salt_prev.valid_at = now - 1
 
     async def fetch_layer(self) -> None:
         if self.auth_data is None or self.auth_data.perm_auth_key_id is None:
@@ -252,6 +331,7 @@ class Session:
         self.auth_id = None
         self.is_bot = False
         self.mfa_pending = False
+        self._upd_seq = None
         self.channel_ids.clear()
 
     async def refresh_auth_maybe(self, force_refresh_auth: bool = False) -> None:
@@ -278,12 +358,15 @@ class Session:
 
             auth = await UserAuthorization.get_or_none(
                 key_id=perm_auth_key_id,
-            ).select_related("user").annotate(is_bot=F("user__bot")).only("id", "user_id", "mfa_pending", "is_bot")
+            ).select_related("user").annotate(is_bot=F("user__bot")).only(
+                "id", "user_id", "mfa_pending", "is_bot", "upd_seq",
+            )
             if auth is not None:
                 self.user_id = auth.user_id
                 self.auth_id = auth.id
                 self.is_bot = auth.is_bot
                 self.mfa_pending = auth.mfa_pending
+                self._upd_seq = auth.upd_seq
             else:
                 self._reset_auth()
                 return

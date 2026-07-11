@@ -25,7 +25,8 @@ class InMemoryMessageBroker(BaseMessageBroker):
         await super().shutdown()
 
     async def send(self, message: MessageInternal) -> None:
-        await self._messages.put(message)
+        # Deliver inline so live call updates are not delayed behind the queue listener.
+        await self.process_message(message)
 
     async def _listen(self) -> None:
         while self._messages is not None:

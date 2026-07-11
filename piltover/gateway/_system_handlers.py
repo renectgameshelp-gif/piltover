@@ -9,8 +9,8 @@ from loguru import logger
 
 from piltover.db.models import UserAuthorization, AuthKey
 from piltover.tl import InitConnection, MsgsAck, MsgsStateReq, MsgsStateInfo, Ping, Pong, PingDelayDisconnect, \
-    InvokeWithLayer, InvokeAfterMsg, InvokeWithoutUpdates, RpcDropAnswer, DestroySession, DestroySessionOk, \
-    RpcAnswerUnknown, GetFutureSalts, FutureSalt, Long
+    InvokeWithLayer, InvokeAfterMsg, InvokeAfterMsgs, InvokeWithoutUpdates, RpcDropAnswer, DestroySession, \
+    DestroySessionOk, RpcAnswerUnknown, GetFutureSalts, FutureSalt, Long, RpcError
 from piltover.tl.core_types import Message, RpcResult, FutureSalts
 
 if TYPE_CHECKING:
@@ -39,8 +39,8 @@ async def ping_delay_disconnect(client: Client, request: Message[PingDelayDiscon
     return Pong(msg_id=request.message_id, ping_id=request.obj.ping_id)
 
 
-async def _invoke_inner_query(client: Client, request: Message, session: Session) -> RpcResult:
-    return await client.propagate(
+async def _invoke_inner_query(client: Client, request: Message, session: Session) -> RpcResult | None:
+    return await client._process_request(
         Message(
             obj=request.obj.query,
             message_id=request.message_id,
@@ -48,6 +48,25 @@ async def _invoke_inner_query(client: Client, request: Message, session: Session
         ),
         session,
     )
+
+
+def _invoke_after_wait_timeout() -> float:
+    from piltover.config import GATEWAY_CONFIG
+
+    if GATEWAY_CONFIG is None:
+        return 600.0
+    return GATEWAY_CONFIG.task_result_slow_timeout
+
+
+async def _wait_for_invoke_after(session: Session, msg_ids: list[int]) -> RpcResult | None:
+    timeout = _invoke_after_wait_timeout()
+    for msg_id in msg_ids:
+        if not await session.wait_for_rpc(msg_id, timeout):
+            return RpcResult(
+                req_msg_id=0,
+                result=RpcError(error_code=420, error_message="MSG_WAIT_TIMEOUT"),
+            )
+    return None
 
 
 async def invoke_with_layer(client: Client, request: Message[InvokeWithLayer], session: Session) -> RpcResult:
@@ -59,11 +78,16 @@ async def invoke_with_layer(client: Client, request: Message[InvokeWithLayer], s
 
 
 async def invoke_after_msg(client: Client, request: Message[InvokeAfterMsg], session: Session) -> RpcResult:
-    logger.critical(
-        "Client wants to execute request after other request would be executed, "
-        "but this is not implemented yet: {request}",
-        request=request,
-    )
+    if (err := await _wait_for_invoke_after(session, [request.obj.msg_id])) is not None:
+        err.req_msg_id = request.message_id
+        return err
+    return await _invoke_inner_query(client, request, session)
+
+
+async def invoke_after_msgs(client: Client, request: Message[InvokeAfterMsgs], session: Session) -> RpcResult:
+    if (err := await _wait_for_invoke_after(session, request.obj.msg_ids)) is not None:
+        err.req_msg_id = request.message_id
+        return err
     return await _invoke_inner_query(client, request, session)
 
 
@@ -130,6 +154,7 @@ SYSTEM_HANDLERS: dict[int, Callable[[Client, Message, Session], Awaitable[RpcRes
     PingDelayDisconnect.tlid(): ping_delay_disconnect,
     InvokeWithLayer.tlid(): invoke_with_layer,
     InvokeAfterMsg.tlid(): invoke_after_msg,
+    InvokeAfterMsgs.tlid(): invoke_after_msgs,
     InvokeWithoutUpdates.tlid(): invoke_without_updates,
     InitConnection.tlid(): init_connection,
     DestroySession.tlid(): destroy_session,

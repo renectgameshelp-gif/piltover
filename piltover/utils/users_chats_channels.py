@@ -36,7 +36,7 @@ CHAT_SELECT_ONLY = (
 CHANNEL_SELECT_ONLY = (
     "id", "version", "deleted", "photo_id", "name", "accent_color_id", "profile_color_id", "accent_emoji_id",
     "profile_emoji_id", "created_at", "creator_id", "channel", "supergroup", "signatures", "discussion_id",
-    "is_discussion", "slowmode_seconds", "no_forwards", "join_to_send", "join_request", "banned_rights",
+    "is_discussion", "slowmode_seconds", "no_forwards", "join_to_send", "join_request", "forum", "banned_rights",
     "nojoin_allow_view",
 
     "photo__id", "photo__photo_stripped",

@@ -4,7 +4,7 @@ from io import BytesIO
 from typing import Literal
 from uuid import uuid4, UUID
 
-from fastrand import xorshift128plus_bytes
+from piltover.utils.fastrand_shim import xorshift128plus_bytes
 from httpx import AsyncClient
 from loguru import logger
 

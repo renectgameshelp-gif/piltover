@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from io import BytesIO
 
-from fastrand import xorshift128plus_bytes
+from piltover.utils.fastrand_shim import xorshift128plus_bytes
 from loguru import logger
 from tortoise import fields, Model
 

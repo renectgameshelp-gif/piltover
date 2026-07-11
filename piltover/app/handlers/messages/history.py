@@ -108,7 +108,7 @@ async def get_messages_query_internal(
         user_id: int, peer: Peer | User, max_id: int, min_id: int, offset_id: int, limit: int, add_offset: int,
         from_user_id: int | None = None, min_date: int | None = None, max_date: int | None = None, q: str | None = None,
         filter_: MessagesFilterBase | None = None, saved_peer: Peer | None = None, unread_reactions: bool = False,
-        only_mentions: bool = False, reply_to_id: int | None = None,
+        only_mentions: bool = False, reply_to_id: int | None = None, top_msg_id: int | None = None,
 ) -> QuerySet[MessageRef]:
     if isinstance(peer, Peer):
         query = Q(peer_id=peer.id)
@@ -167,6 +167,9 @@ async def get_messages_query_internal(
 
     if reply_to_id:
         query &= Q(reply_to_id=reply_to_id, top_message_id=reply_to_id, join_type=Q.OR)
+
+    if top_msg_id:
+        query &= Q(top_message_id=top_msg_id) | Q(id=top_msg_id, join_type=Q.OR)
 
     if isinstance(peer, Peer) and peer.type is PeerType.CHANNEL:
         channel = peer.channel
@@ -315,11 +318,11 @@ async def get_messages_internal(
         user_id: int, peer: Peer | User, max_id: int, min_id: int, offset_id: int, limit: int, add_offset: int,
         from_user_id: int | None = None, min_date: int | None = None, max_date: int | None = None, q: str | None = None,
         filter_: MessagesFilterBase | None = None, saved_peer: Peer | None = None, unread_reactions: bool = False,
-        reply_to_id: int | None = None,
+        reply_to_id: int | None = None, top_msg_id: int | None = None,
 ) -> list[MessageRef]:
     query = await get_messages_query_internal(
         user_id, peer, max_id, min_id, offset_id, limit, add_offset, from_user_id, min_date, max_date, q, filter_,
-        saved_peer, unread_reactions, reply_to_id=reply_to_id,
+        saved_peer, unread_reactions, reply_to_id=reply_to_id, top_msg_id=top_msg_id,
     )
     return await query
 
@@ -408,6 +411,9 @@ async def format_messages_internal(
 
 @handler.on_request(GetHistory, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
 async def get_history(request: GetHistory, user_id: int) -> Messages | MessagesSlice:
+    if isinstance(request.peer, InputPeerEmpty):
+        return Messages(messages=[], chats=[], users=[])
+
     peer = await Peer.from_input_peer_raise(user_id, request.peer, allow_migrated_chat=True)
 
     messages = await get_messages_internal(
@@ -497,7 +503,9 @@ async def read_history(request: ReadHistory, user_id: int) -> AffectedMessages:
         )
 
     old_last_message_id = read_state.last_message_id
-    unread_count = await MessageRef.filter(peer=peer, id__gt=max_id).count()
+    unread_count = await MessageRef.filter(
+        peer=peer, id__gt=max_id, content__author_id__not=user_id,
+    ).count()
 
     read_state.last_message_id = max_id
     if peer.type is PeerType.SELF:
@@ -588,6 +596,7 @@ async def messages_search(request: Search, user_id: int) -> Messages | MessagesS
     messages = await get_messages_internal(
         user_id, peer, request.max_id, request.min_id, request.offset_id, request.limit, request.add_offset,
         from_user_id, request.min_date, request.max_date, request.q, request.filter, saved_peer,
+        top_msg_id=request.top_msg_id,
     )
 
     return await format_messages_internal(user_id, messages)
@@ -1157,7 +1166,9 @@ async def get_discussion_message(request: GetDiscussionMessage, user_id: int) ->
     if read_state is None:
         unread_count = total
     else:
-        unread_count = await MessageRef.filter(replies_query, id__gt=read_state.last_message_id).count()
+        unread_count = await MessageRef.filter(
+            replies_query, id__gt=read_state.last_message_id, content__author_id__not=user_id,
+        ).count()
 
     return DiscussionMessage(
         messages=[await discussion_message.to_tl_maybecached(user_id)],

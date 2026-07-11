@@ -2,20 +2,38 @@ from __future__ import annotations
 
 import asyncio
 from abc import abstractmethod, ABC
-from copy import deepcopy
 from enum import Flag
 from typing import TYPE_CHECKING, Iterable
 
 from loguru import logger
 
 from piltover.cache import Cache
-from piltover.tl import UpdatesTooLong
+from piltover.tl import TLObject, Updates, UpdatesTooLong
 from piltover.tl.base.internal import MessageInternal
 from piltover.tl.types.internal import MessageToUsers, MessageToUsersShort, SetSessionInternalPush, ChannelSubscribe, \
     ObjectWithLayerRequirement, InternalPushForUsers, InternalPushForUsersShort
 
 if TYPE_CHECKING:
     from piltover.session import Session
+
+_PUSH_DELIVER_CONCURRENCY = 8
+_push_deliver_sem: asyncio.Semaphore | None = None
+
+
+def _push_deliver_semaphore() -> asyncio.Semaphore:
+    global _push_deliver_sem
+    if _push_deliver_sem is None:
+        _push_deliver_sem = asyncio.Semaphore(_PUSH_DELIVER_CONCURRENCY)
+    return _push_deliver_sem
+
+
+def _deliver_updates_to_internal_push(obj: TLObject) -> bool:
+    """Internal-push sessions must receive Updates directly; UpdatesTooLong-only adds poll lag."""
+    from piltover.tl import UpdateGroupCall, UpdateGroupCallConnection, UpdateGroupCallParticipants
+
+    if isinstance(obj, Updates):
+        return True
+    return isinstance(obj, (UpdateGroupCall, UpdateGroupCallParticipants, UpdateGroupCallConnection))
 
 
 class BrokerType(Flag):
@@ -33,8 +51,6 @@ class BaseMessageBroker(ABC):
         self.subscribed_auths: dict[int, set[Session]] = {}
         self.subscribed_channels: dict[int, set[Session]] = {}
         self.internal_push_users: dict[int, set[Session]] = {}
-
-        self._tasks = set()
 
     def _cleanup(self) -> None:
         self.subscribed_users.clear()
@@ -217,16 +233,73 @@ class BaseMessageBroker(ABC):
             "Got message {message!r} that will be sent to {count} sessions", message=message, count=len(send_to)
         )
 
-        for session in send_to:
-            if session.auth_id in ignore_auths or session.is_internal_push:
-                continue
+        deliver_to_internal_push = _deliver_updates_to_internal_push(message.obj)
+
+        async def _deliver(session: Session) -> None:
+            if session.auth_id in ignore_auths or (session.is_internal_push and not deliver_to_internal_push):
+                return
             try:
-                if isinstance(message.obj, ObjectWithLayerRequirement):
-                    await session.enqueue(deepcopy(message.obj), False)
-                else:
-                    await session.enqueue(message.obj, False)
+                deliver_obj = message.obj
+                if isinstance(deliver_obj, ObjectWithLayerRequirement):
+                    deliver_obj = deliver_obj.object
+                from piltover.tl import Updates as TLUpdates
+                is_group_call_push = isinstance(deliver_obj, TLUpdates) and any(
+                    update.__class__.__name__ in (
+                        "UpdateGroupCallParticipants", "UpdateGroupCall", "UpdateGroupCallConnection",
+                    )
+                    for update in deliver_obj.updates
+                )
+                await session.enqueue(message.obj, False)
+                if is_group_call_push:
+                    await session.flush_outbound()
+                    logger.info(
+                        "GroupCall deliver done user={} session={}",
+                        session.user_id,
+                        session.session_id,
+                    )
             except Exception as e:
                 logger.opt(exception=e).error("Error occurred while sending message")
+
+        if send_to:
+            from piltover.tl import Updates as TLUpdates
+
+            obj = message.obj
+            is_updates_push = isinstance(obj, TLUpdates) or (
+                isinstance(obj, ObjectWithLayerRequirement) and isinstance(obj.object, TLUpdates)
+            )
+            if is_updates_push:
+                sessions = list(send_to)
+                sem = _push_deliver_semaphore()
+
+                async def _deliver_all() -> None:
+                    async def _deliver_limited(session: Session) -> None:
+                        async with sem:
+                            await _deliver(session)
+
+                    results = await asyncio.gather(
+                        *(_deliver_limited(session) for session in sessions),
+                        return_exceptions=True,
+                    )
+                    for session, result in zip(sessions, results):
+                        if isinstance(result, Exception):
+                            logger.opt(exception=result).error(
+                                "Push deliver failed for user {user_id} session {session_id}",
+                                user_id=session.user_id,
+                                session_id=session.session_id,
+                            )
+
+                task = asyncio.create_task(_deliver_all())
+
+                def _on_done(t: asyncio.Task) -> None:
+                    if t.cancelled():
+                        return
+                    exc = t.exception()
+                    if exc is not None:
+                        logger.opt(exception=exc).error("Push deliver batch failed")
+
+                task.add_done_callback(_on_done)
+            else:
+                await asyncio.gather(*(_deliver(session) for session in send_to))
 
     async def _process_channels_subscribe(self, message: ChannelSubscribe) -> None:
         logger.trace(f"Subscribing/unsubscribing {len(message.user_ids)} to {len(message.channel_ids)} channels...")
@@ -294,7 +367,4 @@ class BaseMessageBroker(ABC):
                 await self._process_internal_push_to_users(message)
 
     async def process_message(self, message: MessageInternal) -> None:
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(self._process_message(message))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        await self._process_message(message)

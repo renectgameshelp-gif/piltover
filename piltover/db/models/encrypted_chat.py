@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastrand import xorshift128plus_bytes
+from piltover.utils.fastrand_shim import xorshift128plus_bytes
 from tortoise import fields, Model
 
 from piltover.db import models

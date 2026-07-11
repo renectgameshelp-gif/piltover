@@ -18,10 +18,10 @@ def _flood_wait(seconds: int) -> None:
 
 
 async def _bump_counter(key: str, window_seconds: int) -> int:
-    if not await Cache.obj.exists(key):
-        await Cache.obj.set(key, 1, ttl=window_seconds)
-        return 1
-    return await Cache.obj.increment(key, 1)
+    current = await Cache.obj.get(key)
+    new_value = 1 if current is None else int(current) + 1
+    await Cache.obj.set(key, new_value, ttl=window_seconds)
+    return new_value
 
 
 async def _seconds_until(key: str, min_interval: int) -> int | None:

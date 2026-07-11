@@ -20,6 +20,7 @@ class Dialog(DialogBase):
     unread_mark: bool = fields.BooleanField(default=False)
     folder_id: DialogFolderId = fields.IntEnumField(DialogFolderId, default=DialogFolderId.ALL, description="")
     visible: bool = fields.BooleanField(default=True)
+    view_forum_as_messages: bool = fields.BooleanField(default=False)
 
     class Meta:
         unique_together = (
@@ -71,7 +72,7 @@ class Dialog(DialogBase):
             ttl_period=self.peer.user_ttl_period_days * 86400 if self.peer.user_ttl_period_days else None,
             pts=pts,
 
-            view_forum_as_messages=False,
+            view_forum_as_messages=self.view_forum_as_messages,
             notify_settings=PeerNotifySettings(),
         )
 
@@ -121,7 +122,7 @@ class Dialog(DialogBase):
                 unread_mentions_count=unread_mentions,
                 ttl_period=dialog.peer.user_ttl_period_days * 86400 if dialog.peer.user_ttl_period_days else None,
 
-                view_forum_as_messages=False,
+                view_forum_as_messages=dialog.view_forum_as_messages,
                 notify_settings=PeerNotifySettings(),
             ))
 

@@ -5,7 +5,7 @@ from time import time
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
-from fastrand import xorshift128plus_bytes
+from piltover.utils.fastrand_shim import xorshift128plus_bytes
 from loguru import logger
 from tortoise.expressions import Q
 
@@ -156,7 +156,7 @@ async def _create_reactions(args: ArgsNamespace) -> None:
         except ValueError:
             continue
 
-        with open(reactions_dir / reaction_file) as f:
+        with open(reactions_dir / reaction_file, encoding="utf-8") as f:
             reaction_info = json.load(f)
 
         defaults = {"title": reaction_info["title"], "reaction": reaction_info["reaction"]}
@@ -207,7 +207,7 @@ async def _create_chat_themes(args: ArgsNamespace) -> None:
         except ValueError:
             continue
 
-        with open(chat_themes_dir / chat_theme_file) as f:
+        with open(chat_themes_dir / chat_theme_file, encoding="utf-8") as f:
             theme_info = json.load(f)
 
         defaults = {
@@ -351,7 +351,7 @@ async def _create_peer_colors(colors_dir: Path) -> None:
         if not accent_file.endswith(".json") or not accent_file.split(".")[0].isdigit():
             continue
 
-        with open(accent_dir / accent_file) as f:
+        with open(accent_dir / accent_file, encoding="utf-8") as f:
             color_info = json.load(f)
 
         colors = color_info["colors"]["colors"]
@@ -389,7 +389,7 @@ async def _create_peer_colors(colors_dir: Path) -> None:
         if not profile_file.endswith(".json") or not profile_file.split(".")[0].isdigit():
             continue
 
-        with open(profile_dir / profile_file) as f:
+        with open(profile_dir / profile_file, encoding="utf-8") as f:
             color_info = json.load(f)
 
         colors = color_info["colors"]
@@ -485,10 +485,10 @@ async def _create_languages(langs_dir: Path) -> None:
         for lang in listdir(platform_dir):
             lang_dir = platform_dir / lang
 
-            with open(lang_dir / "info.json") as f:
+            with open(lang_dir / "info.json", encoding="utf-8") as f:
                 lang_info = json.load(f)
 
-            with open(lang_dir / "strings.json") as f:
+            with open(lang_dir / "strings.json", encoding="utf-8") as f:
                 lang_strings = json.load(f)
 
             language, created = await Language.update_or_create(
@@ -632,7 +632,7 @@ async def _create_system_stickers(args: ArgsNamespace) -> None:
         if not info_file.exists():
             continue
 
-        with open(info_file) as f:
+        with open(info_file, encoding="utf-8") as f:
             sticker_set = json.load(f)
             set_info = sticker_set["set"]
 
@@ -715,9 +715,18 @@ async def _create_emoji_groups(groups_dir: Path) -> None:
             logger.warning(f"Emoji group file for \"{group_type_name}\" does not exist, skipping")
             continue
 
-        with open(info_file) as f:
+        with open(info_file, encoding="utf-8") as f:
             groups_info = json.load(f)
-            groups = groups_info["groups"]
+
+        if groups_info.get("_") != "types.messages.EmojiGroups" or "groups" not in groups_info:
+            logger.warning(
+                "Emoji group file {file!r} is invalid ({type}), skipping — re-run download_emoji_groups.py",
+                file=info_file.name,
+                type=groups_info.get("_", "unknown"),
+            )
+            continue
+
+        groups = groups_info["groups"]
 
         created_group_ids = []
 
@@ -813,7 +822,7 @@ async def create_system_data(
         import json
         from piltover.db.models import AuthCountry, AuthCountryCode
 
-        with open(auth_countries_file) as f:
+        with open(auth_countries_file, encoding="utf-8") as f:
             countries = json.load(f)
 
         for country in countries:

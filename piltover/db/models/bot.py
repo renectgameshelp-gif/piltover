@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from base64 import urlsafe_b64encode
 
-from fastrand import xorshift128plus_bytes
+from piltover.utils.fastrand_shim import xorshift128plus_bytes
 from tortoise import Model, fields
 
 from piltover.db import models

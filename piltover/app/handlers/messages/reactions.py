@@ -119,10 +119,9 @@ async def send_reaction(request: SendReaction, user_id: int) -> Updates:
         if peer.type is PeerType.CHANNEL:
             await existing_reaction.delete()
         else:
-            reactions_q = MessageReaction.filter(
+            await MessageReaction.filter(
                 user_id=user_id, message_id=message.content_id,
-            ).values_list("id", flat=True)
-            await MessageReaction.filter(id__in=Subquery(reactions_q)).delete()
+            ).delete()
 
     author_reactions_unread: F | bool = F("author_reactions_unread")
 
@@ -228,9 +227,7 @@ async def read_reactions(request: ReadReactions, user_id: int) -> AffectedHistor
     peer = await Peer.from_input_peer_raise(user_id, request.peer)
 
     await MessageContent.filter(
-        id__in=Subquery(
-            MessageContent.filter(messagerefs__peer=peer, author_reactions_unread=True, author_id=user_id).values("id")
-        )
+        messagerefs__peer=peer, author_reactions_unread=True, author_id=user_id,
     ).update(
         reactions_version=F("reactions_version") + 1,
         author_reactions_unread=False,

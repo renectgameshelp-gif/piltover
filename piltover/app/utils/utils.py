@@ -48,12 +48,52 @@ BOT_COMMAND_NAME_REGEX = re.compile(r'[a-zA-Z0-9_]{1,64}')
 BOT_COMMAND_REGEX = re.compile(r'/[a-zA-Z0-9_]{1,64}\b')
 B64URL_STR_RE = re.compile(r'^[A-Za-z0-9\-_]*={0,2}$')
 
+def _detect_buffer_mime_fallback(header: bytes) -> str | None:
+    if header.startswith(b"OggS"):
+        return "audio/ogg"
+    if header.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if header[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return "image/webp"
+    if header.startswith(b"%PDF-"):
+        return "application/pdf"
+    if header.startswith(b"ID3") or header[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "audio/mpeg"
+    if header.startswith(b"\x1a\x45\xdf\xa3"):
+        return "video/webm"
+    if len(header) >= 12 and header[4:8] == b"ftyp":
+        brand = header[8:12]
+        if brand in (b"qt  ", b"moov", b"wide"):
+            return "video/quicktime"
+        return "video/mp4"
+    return None
+
+
+def detect_buffer_mime(data: bytes) -> str | None:
+    if not data:
+        return None
+    header = data[:4096]
+    try:
+        import magic
+        mime = magic.from_buffer(header, mime=True)
+        if mime and mime != "application/octet-stream":
+            return mime
+    except Exception:
+        logger.trace("libmagic unavailable, using MIME signature fallback")
+    return _detect_buffer_mime_fallback(header)
+
+
 MIME_TO_TL = {
     "image/jpeg": FileJpeg(),
     "image/gif": FileGif(),
     "image/png": FilePng(),
     "application/pdf": FilePdf(),
     "audio/mpeg": FileMp3(),
+    "audio/ogg": FileMp3(),
     "video/quicktime": FileMov(),
     "video/mp4": FileMp4(),
     "image/webp": FileWebp(),
@@ -484,8 +524,13 @@ async def process_message_entities(
 
 
 def is_username_valid(username: str) -> bool:
-    return 5 < len(username) < 32 and USERNAME_REGEX.match(username)
-
+    if not isinstance(username, str):
+        return False
+    
+    if not (5 <= len(username) <= 32):
+        return False
+    
+    return USERNAME_REGEX.fullmatch(username) is not None
 
 def validate_username(username: str) -> None:
     if not is_username_valid(username):

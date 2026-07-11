@@ -6,7 +6,7 @@ from time import time
 from typing import cast
 from uuid import UUID
 
-from fastrand import xorshift128plus_bytes
+from piltover.utils.fastrand_shim import xorshift128plus_bytes
 from loguru import logger
 from tortoise.expressions import Q, F
 from tortoise.transactions import in_transaction

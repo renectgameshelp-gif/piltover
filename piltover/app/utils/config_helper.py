@@ -27,6 +27,8 @@ def make_broker_from_config() -> AsyncBroker:
         return InMemoryBroker(
             max_async_tasks=128,
             cast_types=False,
+            # Run RPC handlers inline so live Updates are enqueued before RpcResult.
+            await_inplace=True,
         ).with_result_backend(FasterInmemoryResultBackend())
     else:
         logger.info("Using AioPikaBroker + RedisAsyncResultBackend for taskiq")

@@ -14,6 +14,12 @@ class _Gateway(BaseModel):
     privkey_file: Path | None = None
     pubkey_file: Path | None = None
     salt_key: Base64Bytes
+    # How long to wait for a worker result before sending MsgsAck to the client.
+    task_ack_timeout: float = 1.5
+    # How long to keep waiting after MsgsAck for most RPC methods.
+    task_result_timeout: float = 30.0
+    # How long to keep waiting after MsgsAck for uploads and other heavy RPC methods.
+    task_result_slow_timeout: float = 600.0
 
     @model_validator(mode="after")
     def set_default_keys(self) -> Self:

@@ -14,6 +14,7 @@ SELECT
     state.peer_id peer, COUNT(mref.id) count
 FROM readstate state
     JOIN messageref mref on state.peer_id = mref.peer_id and mref.id > state.last_message_id
+    JOIN messagecontent mc on mref.content_id = mc.id and mc.author_id != state.owner_id
 WHERE state.owner_id = {user_id_param} AND state.peer_id {peer_condition}
 GROUP BY state.peer_id
 ;
@@ -147,7 +148,9 @@ class ReadState(Model):
             cls, user_id: int, peer: models.Peer, no_reactions: bool = False, no_mentions: bool = False,
     ) -> tuple[int, int, int, int, int]:
         in_read_state, _ = await models.ReadState.get_or_create(owner_id=user_id, peer=peer)
-        unread_count = await models.MessageRef.filter(peer=peer, id__gt=in_read_state.last_message_id).count()
+        unread_count = await models.MessageRef.filter(
+            peer=peer, id__gt=in_read_state.last_message_id, content__author_id__not=user_id,
+        ).count()
         if no_reactions:
             unread_reactions_count = 0
         else:

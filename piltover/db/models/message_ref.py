@@ -176,16 +176,17 @@ class MessageRef(Model):
             mentioned = False
             mention_read = True
 
+        out = user_id == self.content.author_id
         media_unread = False
-        if self.content.media \
+        if not out and self.content.media \
                 and self.content.media.file \
                 and self.content.media.file.type in READABLE_FILE_TYPES:
             media_unread = not await models.MessageMediaRead.filter(user_id=user_id, message=self).exists()
 
         message = self._to_tl_ref(
-            out=user_id == self.content.author_id,
-            mentioned=mentioned,
-            media_unread=media_unread if media_unread else not mention_read,
+            out=out,
+            mentioned=False if out else mentioned,
+            media_unread=False if out else (media_unread if media_unread else not mention_read),
         )
 
         await Cache.obj.set(cache_key, message)
@@ -270,10 +271,13 @@ class MessageRef(Model):
                 result.append(cached_ref)
                 continue
 
+            out = user_id == ref.content.author_id
             result.append(ref._to_tl_ref(
-                out=user_id == ref.content.author_id,
-                mentioned=ref.content_id in mentioned,
-                media_unread=ref.id not in media_read and not mentioned.get(ref.content_id, True),
+                out=out,
+                mentioned=False if out else ref.content_id in mentioned,
+                media_unread=False if out else (
+                    ref.id not in media_read and not mentioned.get(ref.content_id, True)
+                ),
             ))
 
             to_cache.append((ref.cache_key(user_id), result[-1]))
@@ -700,9 +704,16 @@ class MessageRef(Model):
         if self.reply_to_id is None and self.top_message_id is None:
             return None
 
+        forum_topic = (
+            self.top_message_id is not None
+            and self.reply_to_id == self.top_message_id
+            and not self.is_discussion
+        )
+
         return MessageReplyHeader(
             reply_to_msg_id=self.reply_to_id,
             reply_to_top_id=self.top_message_id,
+            forum_topic=forum_topic,
         )
 
     async def _get_user_reaction(self, user_id: int) -> tuple[int, None] | tuple[None, int] | None:

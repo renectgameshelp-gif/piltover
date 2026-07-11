@@ -90,7 +90,12 @@ from .message_media_read import MessageMediaRead
 from .phone_call import PhoneCall
 from .taskiq_scheduled_delete_user import TaskIqScheduledDeleteUser
 from .discussion_read_state import DiscussionReadState
+from .forum_topic import ForumTopic
+from .forum_topic_read_state import ForumTopicReadState
 from .default_send_as import DefaultSendAs
+from .group_call import GroupCall
+from .group_call_participant import GroupCallParticipant
+from .default_group_call_join_as import DefaultGroupCallJoinAs
 from .message_unique_view import MessageUniqueView
 from .user_emoji_status import UserEmojiStatus
 from .user_stars_balance import UserStarsBalance

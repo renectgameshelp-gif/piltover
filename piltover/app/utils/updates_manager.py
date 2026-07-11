@@ -1,3 +1,4 @@
+import asyncio
 from asyncio import sleep
 from time import time
 from typing import Collection, cast
@@ -28,7 +29,8 @@ from piltover.tl import Updates, UpdateNewMessage, UpdateMessageID, UpdateReadHi
     UpdateFavedStickers, UpdateSavedDialogPinned, UpdatePinnedSavedDialogs, UpdatePrivacy, \
     UpdateChannelReadMessagesContents, UpdateChannelAvailableMessages, UpdatePhoneCall, UpdatePhoneCallSignalingData, \
     UpdateReadChannelOutbox, UpdatePinnedChannelMessages, UpdateUserEmojiStatus, EmojiStatusEmpty, PeerChat, \
-    UpdateStarsBalance, StarsAmount
+    UpdateStarsBalance, StarsAmount, UpdateGroupCall, UpdateGroupCallParticipants, UpdateGroupCallConnection, \
+    InputGroupCall
 from piltover.tl.layer_info import layer
 from piltover.tl.to_format import ChannelMessageToFormat
 from piltover.tl.to_format.update_message_id import UpdateMessageIDToFormat
@@ -76,6 +78,7 @@ async def send_message(
         pts_counts.append(2 if message.random_id else 1)
 
     ptss = await State.add_pts_bulk(pts_users, pts_counts)
+    outbound: list[tuple[UpdatesWithDefaults, int, int | None]] = []
 
     for target_user_id, new_pts in zip(pts_users, ptss):
         peer = peer_by_user_id[target_user_id]
@@ -120,10 +123,13 @@ async def send_message(
             result = updates
 
         ignore_auth_id = request_ctx.get().auth_id if ignore_current and target_user_id == current_user_id else None
-        await SessionManager.send(updates, target_user_id, ignore_auth_id=ignore_auth_id)
+        outbound.append((updates, target_user_id, ignore_auth_id))
 
     if updates_to_create:
         await Update.bulk_create(updates_to_create)
+
+    for updates, target_user_id, ignore_auth_id in outbound:
+        await SessionManager.send(updates, target_user_id, ignore_auth_id=ignore_auth_id)
 
     await SessionManager.send_internal_push(list(peer_by_user_id))
 
@@ -217,6 +223,7 @@ async def send_messages(
             pts_counts[-1] += 2 if message.random_id else 1
 
     ptss = await State.add_pts_bulk(pts_users, pts_counts)
+    outbound: list[tuple[UpdatesWithDefaults, int]] = []
 
     for target_user_id, pts_count, new_pts in zip(pts_users, pts_counts, ptss):
         pts = new_pts - pts_count
@@ -263,13 +270,16 @@ async def send_messages(
             chats=chats_and_channels,
         )
 
-        await SessionManager.send(updates, target_user_id)
+        outbound.append((updates, target_user_id))
         if user is not None and target_user_id == user.id:
             result_update = updates
             result_pts = new_pts
 
     if updates_to_create:
         await Update.bulk_create(updates_to_create)
+
+    for updates, target_user_id in outbound:
+        await SessionManager.send(updates, target_user_id)
 
     await SessionManager.send_internal_push(list(peer_by_user_id))
 
@@ -2209,4 +2219,462 @@ async def update_stars_balance(user_id: int, balance: StarsAmount) -> Updates:
         updates=[UpdateStarsBalance(balance=balance)],
     )
     await SessionManager.send(updates, user_id)
+    return updates
+
+
+async def _group_call_chat_tl(chat_or_channel: Chat | Channel):
+    return await chat_or_channel.to_tl()
+
+
+async def _fresh_group_call_chat_tl(chat_or_channel: Chat | Channel):
+    from piltover.cache import Cache
+
+    await Cache.obj.delete(chat_or_channel.cache_key())
+    return await chat_or_channel.to_tl()
+
+
+def spawn_group_call_broadcast(coro) -> None:
+    task = asyncio.create_task(coro)
+
+    def _on_done(t: asyncio.Task) -> None:
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.opt(exception=exc).error("Group call broadcast failed")
+
+    task.add_done_callback(_on_done)
+
+
+async def _group_call_member_user_ids(chat_or_channel: Chat | Channel) -> list[int]:
+    if isinstance(chat_or_channel, Chat):
+        query = ChatParticipant.filter(chat=chat_or_channel, left=False)
+    else:
+        query = ChatParticipant.filter(channel=chat_or_channel, left=False)
+    return cast(list[int], await query.values_list("user_id", flat=True))
+
+
+async def _group_call_live_recipients(
+        chat_or_channel: Chat | Channel,
+        group_call,
+        *,
+        exclude_user_ids: Collection[int] | None = None,
+        to_participants_only: bool = False,
+) -> list[int]:
+    excluded = set(exclude_user_ids or ())
+    if to_participants_only:
+        recipients = await _active_group_call_participant_ids(group_call)
+    else:
+        recipients = await _group_call_member_user_ids(chat_or_channel)
+    if excluded:
+        recipients = [user_id for user_id in recipients if user_id not in excluded]
+    return recipients
+
+
+async def _send_group_call_live_updates(
+        chat_or_channel: Chat | Channel,
+        group_call,
+        updates: Updates,
+        *,
+        exclude_user_ids: Collection[int] | None = None,
+        to_participants_only: bool = False,
+) -> None:
+    recipients = await _group_call_live_recipients(
+        chat_or_channel, group_call,
+        exclude_user_ids=exclude_user_ids, to_participants_only=to_participants_only,
+    )
+    if not recipients:
+        return
+
+    for update in updates.updates:
+        if isinstance(update, UpdateGroupCallParticipants):
+            for participant_tl in update.participants:
+                logger.debug(
+                    "GroupCallMute speaking broadcast call={} version={} recipients={} tl={}",
+                    group_call.id,
+                    update.version,
+                    recipients,
+                    participant_tl,
+                )
+
+    asyncio.create_task(SessionManager.send(updates, user_id=recipients))
+
+
+def _make_group_call_participants_updates(
+        group_call,
+        participants: list,
+        *,
+        viewer_user_id: int | None,
+        just_joined: bool,
+        users_tl: list,
+        chats_tl: list,
+        participant_versioned: bool | None,
+        extra_updates: list | None = None,
+) -> Updates:
+    from piltover.db.models import GroupCall, GroupCallParticipant
+
+    group_call = cast(GroupCall, group_call)
+    participants = cast(list[GroupCallParticipant], participants)
+    updates = list(extra_updates or ())
+    updates.append(
+        UpdateGroupCallParticipants(
+            call=group_call.to_input(),
+            participants=[
+                participant.to_tl(
+                    self_user_id=viewer_user_id,
+                    just_joined=just_joined,
+                    min_=False,
+                    versioned=participant_versioned,
+                )
+                for participant in participants
+            ],
+            version=group_call.version,
+        ),
+    )
+    return UpdatesWithDefaults(
+        updates=updates,
+        users=users_tl,
+        chats=chats_tl,
+    )
+
+
+async def _broadcast_group_call_participants(
+        chat_or_channel: Chat | Channel,
+        group_call,
+        participants: list,
+        *,
+        exclude_user_ids: Collection[int] | None = None,
+        to_participants_only: bool = False,
+        just_joined: bool = False,
+        users_tl: list,
+        include_chat: bool = False,
+        participant_versioned: bool | None = None,
+        extra_updates: list | None = None,
+) -> None:
+    recipients = await _group_call_live_recipients(
+        chat_or_channel, group_call,
+        exclude_user_ids=exclude_user_ids, to_participants_only=to_participants_only,
+    )
+    if not recipients:
+        return
+
+    updated_user_ids = {participant.user_id for participant in participants}
+    other_recipients = [user_id for user_id in recipients if user_id not in updated_user_ids]
+    self_recipients = [user_id for user_id in recipients if user_id in updated_user_ids]
+
+    chats_tl = (
+        [await _group_call_chat_tl(chat_or_channel)]
+        if include_chat else []
+    )
+
+    logger.info(
+        "GroupCallMute broadcast call={} version={} others={} self={} excluded={} participants_only={} recipients={}",
+        group_call.id,
+        group_call.version,
+        other_recipients,
+        self_recipients,
+        list(exclude_user_ids or ()),
+        to_participants_only,
+        recipients,
+    )
+    if other_recipients:
+        spawn_group_call_broadcast(SessionManager.send(
+            _make_group_call_participants_updates(
+                group_call, participants,
+                viewer_user_id=None,
+                just_joined=just_joined,
+                users_tl=users_tl,
+                chats_tl=chats_tl,
+                participant_versioned=participant_versioned,
+                extra_updates=extra_updates,
+            ),
+            user_id=other_recipients,
+        ))
+    for recipient_id in self_recipients:
+        spawn_group_call_broadcast(SessionManager.send(
+            _make_group_call_participants_updates(
+                group_call, participants,
+                viewer_user_id=recipient_id,
+                just_joined=just_joined,
+                users_tl=users_tl,
+                chats_tl=chats_tl,
+                participant_versioned=participant_versioned,
+                extra_updates=extra_updates,
+            ),
+            user_id=recipient_id,
+        ))
+
+
+async def _active_group_call_participant_ids(group_call) -> list[int]:
+    from piltover.db.models import GroupCallParticipant
+
+    return cast(
+        list[int],
+        await GroupCallParticipant.filter(group_call=group_call, left=False).values_list("user_id", flat=True),
+    )
+
+
+async def _group_call_recipients(chat_or_channel: Chat | Channel) -> list[int]:
+    return await _group_call_member_user_ids(chat_or_channel)
+
+
+async def group_call_update_for_participants(
+        chat_or_channel: Chat | Channel,
+        group_call,
+        *,
+        participants_count: int | None = None,
+) -> Updates | None:
+    from piltover.db.models import GroupCall
+
+    group_call = cast(GroupCall, group_call)
+    recipients = await _active_group_call_participant_ids(group_call)
+    if not recipients:
+        return None
+
+    updates = UpdatesWithDefaults(
+        updates=[
+            UpdateGroupCall(
+                chat_id=chat_or_channel.make_id(),
+                call=await group_call.to_tl(participants_count=participants_count),
+            ),
+        ],
+        chats=[],
+    )
+    asyncio.create_task(SessionManager.send(updates, user_id=recipients))
+    return updates
+
+
+async def group_call_update(chat_or_channel: Chat | Channel, group_call) -> Updates:
+    from piltover.db.models import GroupCall
+
+    group_call = cast(GroupCall, group_call)
+    updates = UpdatesWithDefaults(
+        updates=[
+            UpdateGroupCall(
+                chat_id=chat_or_channel.make_id(),
+                call=await group_call.to_tl(),
+            ),
+        ],
+        chats=[await _group_call_chat_tl(chat_or_channel)],
+    )
+    recipients = await _group_call_recipients(chat_or_channel)
+    asyncio.create_task(SessionManager.send(updates, user_id=recipients))
+    return updates
+
+
+async def _build_group_call_participants_updates(
+        chat_or_channel: Chat | Channel,
+        group_call,
+        participants: list,
+        *,
+        viewer_user_id: int | None,
+        just_joined: bool,
+        users_tl: list,
+        include_chat: bool = False,
+        chats_tl: list | None = None,
+        participant_versioned: bool | None = None,
+) -> Updates:
+    if chats_tl is None:
+        chats_tl = (
+            [await _group_call_chat_tl(chat_or_channel)]
+            if include_chat else []
+        )
+    return _make_group_call_participants_updates(
+        group_call, participants,
+        viewer_user_id=viewer_user_id,
+        just_joined=just_joined,
+        users_tl=users_tl,
+        chats_tl=chats_tl,
+        participant_versioned=participant_versioned,
+    )
+
+
+async def group_call_participants_update(
+        chat_or_channel: Chat | Channel,
+        group_call,
+        participants: list,
+        *,
+        self_user_id: int | None = None,
+        just_joined: bool = False,
+        exclude_user_ids: Collection[int] | None = None,
+        broadcast: bool = True,
+        to_participants_only: bool = False,
+        participant_versioned: bool | None = None,
+) -> Updates:
+    from piltover.db.models import GroupCall, GroupCallParticipant
+
+    group_call = cast(GroupCall, group_call)
+    participants = cast(list[GroupCallParticipant], participants)
+    user_ids: set[int] = set()
+    for participant in participants:
+        user_ids.add(participant.user_id)
+        if participant.join_as_user_id is not None:
+            user_ids.add(participant.join_as_user_id)
+    users_tl = await User.to_tl_bulk(await User.filter(id__in=user_ids)) if user_ids else []
+
+    if broadcast:
+        logger.debug(
+            "GroupCallMute participants_update broadcast call={} version={} "
+            "exclude={} participants_only={}",
+            group_call.id,
+            group_call.version,
+            list(exclude_user_ids or ()),
+            to_participants_only,
+        )
+        spawn_group_call_broadcast(_broadcast_group_call_participants(
+            chat_or_channel, group_call, participants,
+            exclude_user_ids=exclude_user_ids,
+            to_participants_only=to_participants_only,
+            just_joined=just_joined,
+            users_tl=users_tl,
+            include_chat=just_joined,
+            participant_versioned=participant_versioned,
+        ))
+
+    return await _build_group_call_participants_updates(
+        chat_or_channel, group_call, participants,
+        viewer_user_id=self_user_id, just_joined=just_joined, users_tl=users_tl,
+        include_chat=False,
+        participant_versioned=participant_versioned,
+    )
+
+
+async def group_call_participants_update_with_call(
+        chat_or_channel: Chat | Channel,
+        group_call,
+        participants: list,
+        *,
+        self_user_id: int | None = None,
+        just_joined: bool = False,
+        exclude_user_ids: Collection[int] | None = None,
+        participants_count: int | None = None,
+        participant_versioned: bool | None = None,
+) -> Updates:
+    """Broadcast participants + participant count in one Updates packet (fewer TCP round-trips)."""
+    from piltover.db.models import GroupCall, GroupCallParticipant
+
+    group_call = cast(GroupCall, group_call)
+    participants = cast(list[GroupCallParticipant], participants)
+    user_ids: set[int] = set()
+    for participant in participants:
+        user_ids.add(participant.user_id)
+        if participant.join_as_user_id is not None:
+            user_ids.add(participant.join_as_user_id)
+    users_tl = await User.to_tl_bulk(await User.filter(id__in=user_ids)) if user_ids else []
+
+    if participants_count is None:
+        participants_count = await group_call.participants_count()
+    call_update = UpdateGroupCall(
+        chat_id=chat_or_channel.make_id(),
+        call=await group_call.to_tl(participants_count=participants_count),
+    )
+
+    spawn_group_call_broadcast(_broadcast_group_call_participants(
+        chat_or_channel, group_call, participants,
+        exclude_user_ids=exclude_user_ids,
+        just_joined=just_joined,
+        users_tl=users_tl,
+        include_chat=just_joined,
+        participant_versioned=participant_versioned,
+        extra_updates=[call_update],
+    ))
+
+    return await _build_group_call_participants_updates(
+        chat_or_channel, group_call, participants,
+        viewer_user_id=self_user_id, just_joined=just_joined, users_tl=users_tl,
+        include_chat=False,
+        participant_versioned=participant_versioned,
+    )
+
+
+async def group_call_participants_update_with_call_rpc(
+        chat_or_channel: Chat | Channel,
+        group_call,
+        participants: list,
+        *,
+        just_joined: bool = False,
+        exclude_user_ids: Collection[int] | None = None,
+        participants_count: int | None = None,
+        participant_versioned: bool | None = None,
+) -> None:
+    """Broadcast only — for join/leave where the RPC response is built separately."""
+    from piltover.db.models import GroupCall, GroupCallParticipant
+
+    group_call = cast(GroupCall, group_call)
+    participants = cast(list[GroupCallParticipant], participants)
+    user_ids: set[int] = set()
+    for participant in participants:
+        user_ids.add(participant.user_id)
+        if participant.join_as_user_id is not None:
+            user_ids.add(participant.join_as_user_id)
+    users_tl = await User.to_tl_bulk(await User.filter(id__in=user_ids)) if user_ids else []
+
+    if participants_count is None:
+        participants_count = await group_call.participants_count()
+    call_update = UpdateGroupCall(
+        chat_id=chat_or_channel.make_id(),
+        call=await group_call.to_tl(participants_count=participants_count),
+    )
+
+    spawn_group_call_broadcast(_broadcast_group_call_participants(
+        chat_or_channel, group_call, participants,
+        exclude_user_ids=exclude_user_ids,
+        just_joined=just_joined,
+        users_tl=users_tl,
+        include_chat=just_joined,
+        participant_versioned=participant_versioned,
+        extra_updates=[call_update],
+    ))
+
+
+async def group_call_speaking_update(
+        chat_or_channel: Chat | Channel,
+        group_call,
+        participant,
+        *,
+        speaker_user_id: int,
+) -> None:
+    from piltover.db.models import GroupCall, GroupCallParticipant
+
+    group_call = cast(GroupCall, group_call)
+    participant = cast(GroupCallParticipant, participant)
+    await group_call.refresh_from_db(fields=["version", "participants_version"])
+
+    recipients = await _group_call_live_recipients(
+        chat_or_channel, group_call,
+        exclude_user_ids=[speaker_user_id], to_participants_only=False,
+    )
+    if not recipients:
+        return
+
+    user = await User.get(id=participant.user_id)
+    participant_tl = participant.to_tl_active_ping()
+    updates = UpdatesWithDefaults(
+        updates=[
+            UpdateGroupCallParticipants(
+                call=group_call.to_input(),
+                participants=[participant_tl],
+                version=group_call.version,
+            ),
+        ],
+        users=[await user.to_tl()],
+        chats=[],
+    )
+    logger.info(
+        "GroupCall speaking broadcast call={} version={} speaker={} source={} recipients={} tl={}",
+        group_call.id,
+        group_call.version,
+        speaker_user_id,
+        participant.source,
+        recipients,
+        participant_tl,
+    )
+    await SessionManager.send(updates, user_id=recipients)
+
+
+async def group_call_connection_update(user_id: int, params) -> Updates:
+    updates = UpdatesWithDefaults(
+        updates=[UpdateGroupCallConnection(params=params)],
+    )
+    await SessionManager.send(updates, user_id=user_id)
     return updates

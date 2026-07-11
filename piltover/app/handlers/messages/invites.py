@@ -306,11 +306,7 @@ async def user_join_chat_or_channel(chat_or_channel: ChatBase, user: User, from_
             "left": False,
             "chat_channel_id": chat_or_channel.make_id(),
         })
-        await ChatInviteRequest.filter(id__in=Subquery(
-            ChatInviteRequest.filter(
-                Chat.query(chat_or_channel, "invite") & Q(user_id=user.id)
-            ).values_list("id", flat=True)
-        )).delete()
+        await ChatInviteRequest.delete_for_chat_or_channel(chat_or_channel, user_id=user.id)
         await Dialog.create_or_unhide(user.id, chat_peer)
         if isinstance(chat_or_channel, Channel):
             await AdminLogEntry.create(
@@ -494,11 +490,7 @@ async def add_requested_users_to_chat(user: User, chat: ChatBase, requests: list
 
     await Peer.bulk_create(peers_to_create, ignore_conflicts=True)
     await ChatParticipant.bulk_create(participants_to_create, ignore_conflicts=True)
-    await ChatInviteRequest.filter(id__in=Subquery(
-        ChatInviteRequest.filter(
-            Chat.query(chat, "invite") & Q(user_id__in=requested_users)
-        ).values_list("id", flat=True)
-    )).delete()
+    await ChatInviteRequest.delete_for_chat_or_channel(chat, user_id__in=requested_users)
 
     if isinstance(chat, Chat):
         chat_peers: list[Peer] = await Peer.filter(Chat.query(chat))
@@ -557,11 +549,9 @@ async def hide_chat_join_request(request: HideChatJoinRequest, user_id: int) -> 
         raise ErrorRpc(error_code=400, error_message="HIDE_REQUESTER_MISSING")
 
     if not request.approved:
-        await ChatInviteRequest.filter(id__in=Subquery(
-            ChatInviteRequest.filter(
-                Chat.query(peer.chat_or_channel, "invite") & Q(user=invite_request.user)
-            ).values_list("id", flat=True)
-        )).delete()
+        await ChatInviteRequest.delete_for_chat_or_channel(
+            peer.chat_or_channel, user_id=invite_request.user_id,
+        )
         return await make_chat_join_request_updates(peer.chat_or_channel)
 
     user = await User.get(id=user_id).only("id", "bot")
@@ -596,9 +586,10 @@ async def hide_all_chat_join_requests(request: HideAllChatJoinRequests, user_id:
         raise ErrorRpc(error_code=400, error_message="HIDE_REQUESTER_MISSING")
 
     if not request.approved:
-        await ChatInviteRequest.filter(id__in=Subquery(
-            ChatInviteRequest.filter(query).values_list("id", flat=True)
-        )).delete()
+        if request.link:
+            await ChatInviteRequest.delete_by_invite_ids([invite.id])
+        else:
+            await ChatInviteRequest.delete_for_chat_or_channel(peer.chat_or_channel)
         return await make_chat_join_request_updates(peer.chat_or_channel)
 
     user = await User.get(id=user_id).only("id", "bot")

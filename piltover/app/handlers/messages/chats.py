@@ -85,8 +85,8 @@ async def create_chat(request: CreateChat, user_id: int) -> InvitedUsers:
                 user_id=invited_user_id, chat=chat, chat_channel_id=chat.make_id(), inviter_id=user_id,
             ))
 
-        await Peer.bulk_create(chat_peers_to_create)
-        await ChatParticipant.bulk_create(participants_to_create)
+        await Peer.bulk_create(chat_peers_to_create, ignore_conflicts=True)
+        await ChatParticipant.bulk_create(participants_to_create, ignore_conflicts=True)
         chat.participants_count = len(participants_to_create)
         await chat.save(update_fields=["participants_count"])
 
@@ -166,6 +166,10 @@ async def get_full_chat(request: GetFullChat, user_id: int) -> MessagesChatFull:
     if chat.admin_has_permission(participant, ChatAdminRights.INVITE_USERS):
         invite = await ChatInvite.get_or_create_permanent(user_id, chat)
 
+    from piltover.app.utils.group_calls import get_active_group_call, input_group_call_for_full, get_default_join_as_peer
+    active_group_call = await get_active_group_call(chat)
+    groupcall_default_join_as = await get_default_join_as_peer(user_id, chat)
+
     return MessagesChatFull(
         full_chat=ChatFull(
             can_set_username=True,
@@ -184,6 +188,8 @@ async def get_full_chat(request: GetFullChat, user_id: int) -> MessagesChatFull:
             chat_photo=photo,
             ttl_period=chat.ttl_period_days * 86400 if chat.ttl_period_days else None,
             exported_invite=await invite.to_tl() if invite is not None else None,
+            call=input_group_call_for_full(active_group_call),
+            groupcall_default_join_as=groupcall_default_join_as,
         ),
         chats=[await chat.to_tl()],
         users=[],
@@ -318,7 +324,7 @@ async def add_chat_user(request: AddChatUser, user_id: int) -> InvitedUsers:
     }
     if user_peer_id not in chat_peers:
         async with in_transaction():
-            chat_peers[user_peer_id] = await Peer.create(
+            chat_peers[user_peer_id], _ = await Peer.get_or_create(
                 owner_id=user_peer_id, chat_id=chat.id, type=PeerType.CHAT,
             )
             await ChatParticipant.create(
@@ -327,11 +333,7 @@ async def add_chat_user(request: AddChatUser, user_id: int) -> InvitedUsers:
                 chat_channel_id=chat.make_id(),
                 inviter_id=user_id,
             )
-            await ChatInviteRequest.filter(id__in=Subquery(
-                ChatInviteRequest.filter(
-                    user_id=user_peer_id, invite__chat_id=chat.id,
-                ).values_list("id", flat=True)
-            )).delete()
+            await ChatInviteRequest.delete_for_chat(chat, user_id=user_peer_id)
             await Chat.filter(id=chat.id).update(
                 participants_count=F("participants_count") + 1,
                 version=F("version") + 1.
@@ -595,21 +597,17 @@ async def migrate_chat(request: MigrateChat, user_id: int) -> Updates:
         await Chat.filter(id=chat.id).update(migrated=True, version=F("version") + 1)
         await chat.refresh_from_db(["migrated", "version"])
 
-        await MessageContent.filter(id__in=Subquery(
-            MessageRef.filter(
-                peer__chat=chat, content__type=MessageType.SCHEDULED,
-            ).values_list("content_id", flat=True)
-        )).delete()
+        scheduled_content_ids = list(await MessageRef.filter(
+            peer__chat=chat, content__type=MessageType.SCHEDULED,
+        ).values_list("content_id", flat=True))
+        if scheduled_content_ids:
+            await MessageContent.filter(id__in=scheduled_content_ids).delete()
         await ChatInvite.filter(chat=chat).update(revoked=True)
-        await ChatInviteRequest.filter(id__in=Subquery(
-            ChatInviteRequest.filter(invite__chat=chat).values_list("id", flat=True)
-        )).delete()
+        await ChatInviteRequest.delete_for_chat(chat)
 
         await ChatParticipant.bulk_create(participants_to_create)
-        await Dialog.bulk_create(dialogs_to_create)
-        await Dialog.filter(id__in=Subquery(
-            Dialog.filter(peer__chat=chat).values_list("id", flat=True)
-        )).update(visible=False)
+        await Dialog.bulk_create(dialogs_to_create, ignore_conflicts=True)
+        await Dialog.filter(peer__chat=chat).update(visible=False)
 
     await SessionManager.subscribe_to_channel(channel.id, [participant.user_id for participant in participants])
 
