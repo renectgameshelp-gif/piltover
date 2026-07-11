@@ -5,9 +5,9 @@ from piltover.enums import ReqHandlerFlags
 from piltover.tl import StarsTopupOption, TLObjectVector
 from piltover.tl.functions.payments import (
     GetStarsStatus, GetStarsSubscriptions, GetStarsTransactions, GetStarsTopupOptions,
-    GetPaymentForm, SendStarsForm,
+    GetPaymentForm, SendPaymentForm, SendStarsForm, ValidateRequestedInfo,
 )
-from piltover.tl.types.payments import StarsStatus, PaymentResult
+from piltover.tl.types.payments import StarsStatus, PaymentResult, ValidatedRequestedInfo
 from piltover.worker import MessageHandler
 
 handler = MessageHandler("payments")
@@ -62,9 +62,13 @@ async def get_payment_form(request: GetPaymentForm, user_id: int) -> object:
     return await stars.create_payment_form(user_id, request.invoice)
 
 
-@handler.on_request(SendStarsForm, ReqHandlerFlags.BOT_NOT_ALLOWED)
-async def send_stars_form(request: SendStarsForm, user_id: int) -> PaymentResult:
-    _balance, updated_user_ids = await stars.complete_payment_form(user_id, request.form_id, request.invoice)
+@handler.on_request(ValidateRequestedInfo, ReqHandlerFlags.BOT_NOT_ALLOWED)
+async def validate_requested_info() -> ValidatedRequestedInfo:
+    return ValidatedRequestedInfo()
+
+
+async def _finish_stars_payment(user_id: int, form_id: int, invoice: object) -> PaymentResult:
+    _balance, updated_user_ids = await stars.complete_payment_form(user_id, form_id, invoice)
 
     payer_balance = await UserStarsBalance.get_or_create_for(user_id)
     payer_updates = await upd.update_stars_balance(user_id, payer_balance.to_stars_amount())
@@ -76,3 +80,13 @@ async def send_stars_form(request: SendStarsForm, user_id: int) -> PaymentResult
         await upd.update_stars_balance(updated_user_id, recipient_balance.to_stars_amount())
 
     return PaymentResult(updates=payer_updates)
+
+
+@handler.on_request(SendPaymentForm, ReqHandlerFlags.BOT_NOT_ALLOWED)
+async def send_payment_form(request: SendPaymentForm, user_id: int) -> PaymentResult:
+    return await _finish_stars_payment(user_id, request.form_id, request.invoice)
+
+
+@handler.on_request(SendStarsForm, ReqHandlerFlags.BOT_NOT_ALLOWED)
+async def send_stars_form(request: SendStarsForm, user_id: int) -> PaymentResult:
+    return await _finish_stars_payment(user_id, request.form_id, request.invoice)

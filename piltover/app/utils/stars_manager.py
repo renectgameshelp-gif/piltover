@@ -12,11 +12,12 @@ from piltover.tl import (
     StarsAmount, InputInvoiceStars, InputStorePaymentStarsTopup, InputStorePaymentStarsGift,
     Invoice, LabeledPrice,
 )
-from piltover.tl.types.payments import PaymentFormStars, StarsStatus
+from piltover.tl.types.payments import PaymentForm, PaymentFormStars, StarsStatus
 from piltover.utils.users_chats_channels import UsersChatsChannels
 
 SYSTEM_STARS_BOT_ID = 777000
 STARS_CURRENCY = "XTR"
+STARS_PAYMENT_URL = "https://example.org"
 
 
 async def ensure_wallet_user_id(user_id: int, peer: object) -> int:
@@ -120,7 +121,14 @@ async def _parse_stars_invoice(
     raise ErrorRpc(error_code=400, error_message="INVOICE_INVALID")
 
 
-async def create_payment_form(user_id: int, invoice: object) -> PaymentFormStars:
+def _invoice_for_fiat(currency: str, amount: int) -> Invoice:
+    return Invoice(
+        currency=currency,
+        prices=[LabeledPrice(label="Stars", amount=amount)],
+    )
+
+
+async def create_payment_form(user_id: int, invoice: object) -> PaymentForm | PaymentFormStars:
     purpose, stars, currency, amount, gift_user_id = await _parse_stars_invoice(user_id, invoice)
 
     if purpose is StarsPaymentPurpose.GIFT:
@@ -141,12 +149,24 @@ async def create_payment_form(user_id: int, invoice: object) -> PaymentFormStars
         gift_user_id=gift_user_id,
     )
 
-    return PaymentFormStars(
+    if currency == STARS_CURRENCY:
+        return PaymentFormStars(
+            form_id=form.id,
+            bot_id=SYSTEM_STARS_BOT_ID,
+            title=title,
+            description=description,
+            invoice=_invoice_for_stars(stars),
+            users=[],
+        )
+
+    return PaymentForm(
         form_id=form.id,
         bot_id=SYSTEM_STARS_BOT_ID,
         title=title,
         description=description,
-        invoice=_invoice_for_stars(stars),
+        invoice=_invoice_for_fiat(currency, amount),
+        provider_id=SYSTEM_STARS_BOT_ID,
+        url=STARS_PAYMENT_URL,
         users=[],
     )
 
