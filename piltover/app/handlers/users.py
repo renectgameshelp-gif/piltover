@@ -32,6 +32,7 @@ _PEER_FULL_USER_ONLY = (
     "user__about",
     "user__birthday",
     "user__bot",
+    "user__system",
     "user__deleted",
     "user__read_dates_private",
     "user__version",
@@ -157,7 +158,11 @@ async def get_full_user(request: GetFullUser, user_id: int) -> UserFull:
             personal_channel_message=personal_channel_msg_id,
             bot_info=bot_info,
             blocked=peer.blocked_at is not None,
-            phone_calls_available=not target_user.bot and privacy_rules[PrivacyRuleKeyType.PHONE_CALL],
+            phone_calls_available=(
+                not target_user.bot
+                and not target_user.system
+                and privacy_rules[PrivacyRuleKeyType.PHONE_CALL]
+            ),
             phone_calls_private=False,
             fallback_photo=photo_fallback_db.to_tl() if photo_fallback_db is not None else None,
             translations_disabled=True,

@@ -84,7 +84,7 @@ class PiltoverApp:
         self._public_key = pubkey.read_text()
 
         broker = make_broker_from_config()
-        message_broker = make_message_broker_from_config(broker)
+        message_broker = make_message_broker_from_config(broker, for_gateway=True)
 
         self._gateway = Gateway(
             data_dir=data_dir,

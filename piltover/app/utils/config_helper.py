@@ -33,18 +33,23 @@ def make_broker_from_config() -> AsyncBroker:
         return AioPikaBroker(rabbitmq_address).with_result_backend(RedisAsyncResultBackend(redis_address))
 
 
-def make_message_broker_from_config(broker: AsyncBroker | None) -> BaseMessageBroker:
+def make_message_broker_from_config(
+        broker: AsyncBroker | None, *, for_gateway: bool = False,
+) -> BaseMessageBroker:
     rabbitmq_address = SYSTEM_CONFIG.rabbitmq_address
     redis_address = SYSTEM_CONFIG.redis_address
 
     if not REMOTE_BROKER_SUPPORTED or rabbitmq_address is None or redis_address is None:
         logger.info("Using InMemoryMessageBroker")
         message_broker = InMemoryMessageBroker()
+    elif for_gateway:
+        logger.info("Using RabbitMqMessageBroker (READ) for gateway")
+        message_broker = RabbitMqMessageBroker(BrokerType.READ, rabbitmq_address)
     else:
-        logger.info("Using RabbitMqMessageBroker")
+        logger.info("Using RabbitMqMessageBroker (WRITE) for worker")
         message_broker = RabbitMqMessageBroker(BrokerType.WRITE, rabbitmq_address)
 
-    if broker is not None:
+    if broker is not None and (not for_gateway or isinstance(message_broker, InMemoryMessageBroker)):
         async def _broker_startup(*args, **kwargs) -> None:
             await message_broker.startup()
 

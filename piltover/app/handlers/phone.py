@@ -132,8 +132,11 @@ async def request_call(request: RequestCall | RequestCall_133, user: User) -> Ph
         raise ErrorRpc(error_code=400, error_message="G_A_HASH_INVALID")
 
     peer = await Peer.from_input_peer_raise(
-        user, request.user_id, "USER_ID_INVALID", peer_types=(PeerType.USER,)
+        user, request.user_id, "USER_ID_INVALID", peer_types=(PeerType.USER,),
+        select_related=("user",),
     )
+    if peer.user.bot or peer.user.system:
+        raise ErrorRpc(error_code=400, error_message="USER_ID_INVALID")
     if peer.blocked_at:
         raise ErrorRpc(error_code=403, error_message="USER_IS_BLOCKED")
     if not await PrivacyRule.has_access_to(user, peer.user, PrivacyRuleKeyType.PHONE_CALL):

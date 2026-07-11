@@ -10,7 +10,8 @@ from loguru import logger
 from taskiq import TaskiqEvents, AsyncBroker
 
 from piltover.gateway.client import Client
-from piltover.message_brokers.base_broker import BaseMessageBroker
+from piltover.message_brokers.base_broker import BaseMessageBroker, BrokerType
+from piltover.message_brokers.rabbitmq_broker import RabbitMqMessageBroker
 from piltover.session import SessionManager
 from piltover.utils import gen_keys, get_public_key_fingerprint, load_private_key, load_public_key, Keys
 
@@ -55,6 +56,11 @@ class Gateway:
 
     async def _broker_startup(self, *args, **kwargs) -> None:
         SessionManager.set_broker(self.message_broker)
+        if (
+                isinstance(self.message_broker, RabbitMqMessageBroker)
+                and BrokerType.READ in self.message_broker.broker_type
+        ):
+            await self.message_broker.startup()
 
     @logger.catch
     async def accept_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
