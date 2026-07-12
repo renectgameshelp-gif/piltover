@@ -93,6 +93,18 @@ async def fetch_transactions(
     return rows, next_offset
 
 
+async def fetch_transactions_by_id(wallet_user_id: int, transaction_ids: list[str]) -> list[StarsTransaction]:
+    if not transaction_ids:
+        return []
+    rows = await StarsTransaction.filter(
+        user_id=wallet_user_id,
+        transaction_id__in=transaction_ids,
+    ).all()
+    order = {tx_id: idx for idx, tx_id in enumerate(transaction_ids)}
+    rows.sort(key=lambda row: order.get(row.transaction_id, len(transaction_ids)))
+    return rows
+
+
 def _invoice_for_stars(stars: int) -> Invoice:
     return Invoice(
         currency=STARS_CURRENCY,
@@ -189,6 +201,28 @@ async def grant_stars(
     return balance
 
 
+async def spend_stars(
+        user_id: int,
+        stars: int,
+        *,
+        peer_type: StarsTransactionPeerType,
+        title: str,
+        description: str | None = None,
+        gift: bool = False,
+        peer_user_id: int | None = None,
+) -> UserStarsBalance:
+    balance, _ = await _debit_stars(
+        user_id,
+        stars,
+        peer_type=peer_type,
+        title=title,
+        description=description,
+        gift=gift,
+        peer_user_id=peer_user_id,
+    )
+    return balance
+
+
 async def _credit_stars(
         wallet_user_id: int,
         stars: int,
@@ -224,6 +258,43 @@ async def _credit_stars(
     return balance, tx
 
 
+async def _debit_stars(
+        wallet_user_id: int,
+        stars: int,
+        *,
+        peer_type: StarsTransactionPeerType,
+        title: str,
+        description: str | None = None,
+        gift: bool = False,
+        peer_user_id: int | None = None,
+) -> tuple[UserStarsBalance, StarsTransaction]:
+    if stars <= 0:
+        raise ErrorRpc(error_code=400, error_message="STARS_AMOUNT_INVALID")
+
+    async with in_transaction():
+        balance = await UserStarsBalance.filter(user_id=wallet_user_id).select_for_update().first()
+        if balance is None or balance.amount < stars:
+            raise ErrorRpc(error_code=400, error_message="BALANCE_TOO_LOW")
+
+        balance.amount -= stars
+        await balance.save(update_fields=["amount"])
+
+        tx = await StarsTransaction.create(
+            transaction_id=StarsTransaction.gen_id(),
+            user_id=wallet_user_id,
+            stars_amount=stars,
+            inbound=False,
+            date=int(time()),
+            peer_type=peer_type,
+            peer_user_id=peer_user_id,
+            title=title,
+            description=description,
+            gift=gift,
+        )
+
+    return balance, tx
+
+
 async def complete_payment_form(user_id: int, form_id: int, invoice: object) -> tuple[UserStarsBalance, list[int]]:
     purpose, stars, _currency, _amount, gift_user_id = await _parse_stars_invoice(user_id, invoice)
 
@@ -241,7 +312,11 @@ async def complete_payment_form(user_id: int, form_id: int, invoice: object) -> 
     await form.delete()
 
     updated_user_ids: list[int] = []
+    paid_with_stars = form.currency == STARS_CURRENCY
+
     if purpose is StarsPaymentPurpose.TOPUP:
+        if paid_with_stars:
+            raise ErrorRpc(error_code=400, error_message="INVOICE_INVALID")
         balance, _ = await _credit_stars(
             user_id,
             stars,
@@ -254,7 +329,21 @@ async def complete_payment_form(user_id: int, form_id: int, invoice: object) -> 
         return balance, updated_user_ids
 
     assert gift_user_id is not None
-    balance, _ = await _credit_stars(
+    if paid_with_stars:
+        payer_balance, _ = await _debit_stars(
+            user_id,
+            stars,
+            peer_type=StarsTransactionPeerType.PEER,
+            title="Stars Gift",
+            description=f"Gifted {stars} Telegram Stars",
+            gift=True,
+            peer_user_id=gift_user_id,
+        )
+        updated_user_ids.append(user_id)
+    else:
+        payer_balance = await UserStarsBalance.get_or_create_for(user_id)
+
+    recipient_balance, _ = await _credit_stars(
         gift_user_id,
         stars,
         inbound=True,
@@ -265,4 +354,4 @@ async def complete_payment_form(user_id: int, form_id: int, invoice: object) -> 
         peer_user_id=user_id,
     )
     updated_user_ids.append(gift_user_id)
-    return balance, updated_user_ids
+    return payer_balance if paid_with_stars else recipient_balance, updated_user_ids

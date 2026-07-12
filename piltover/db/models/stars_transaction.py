@@ -15,7 +15,7 @@ from piltover.utils.users_chats_channels import UsersChatsChannels
 
 
 class StarsTransaction(Model):
-    transaction_id: str = fields.CharField(max_length=64, pk=True)
+    transaction_id: str = fields.CharField(max_length=64, primary_key=True)
     user: models.User = fields.ForeignKeyField("models.User", related_name="stars_transactions")
     stars_amount: int = fields.BigIntField()
     stars_nanos: int = fields.IntField(default=0)
@@ -38,7 +38,9 @@ class StarsTransaction(Model):
         return uuid4().hex
 
     def to_stars_amount(self) -> StarsAmount:
-        return StarsAmount(amount=self.stars_amount, nanos=self.stars_nanos)
+        signed_amount = self.stars_amount if self.inbound else -self.stars_amount
+        signed_nanos = self.stars_nanos if self.inbound else -self.stars_nanos
+        return StarsAmount(amount=signed_amount, nanos=signed_nanos)
 
     def _peer_tl(self, ucc: UsersChatsChannels) -> StarsTransactionPeer | StarsTransactionPeerFragment | StarsTransactionPeerAppStore | StarsTransactionPeerPlayMarket | StarsTransactionPeerPremiumBot | StarsTransactionPeerAds | StarsTransactionPeerAPI:
         match self.peer_type:
