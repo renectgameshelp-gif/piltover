@@ -750,7 +750,7 @@ async def upload_wallpaper(request: UploadWallPaper | UploadWallPaper_133, user_
     if not request.mime_type.startswith("image/"):
         raise ErrorRpc(error_code=400, error_message="WALLPAPER_MIME_INVALID")
 
-    uploaded_file = await UploadingFile.get_or_none(user_id=user_id, file_id=request.file.id)
+    uploaded_file = await UploadingFile.get_or_none(user_id=user_id, file_id=str(request.file.id))
     if uploaded_file is None:
         raise ErrorRpc(error_code=400, error_message="WALLPAPER_FILE_INVALID")
     if uploaded_file.mime is None or not uploaded_file.mime.startswith("image/"):

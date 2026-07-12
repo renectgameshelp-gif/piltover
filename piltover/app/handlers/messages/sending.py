@@ -805,7 +805,7 @@ async def _get_media_thumb(
     if media.thumb is None:
         return None
 
-    uploaded_thumb = await UploadingFile.get_or_none(user_id=user_id, file_id=media.thumb.id)
+    uploaded_thumb = await UploadingFile.get_or_none(user_id=user_id, file_id=str(media.thumb.id))
     if uploaded_thumb is None \
             or uploaded_thumb.mime is None \
             or not uploaded_thumb.mime.startswith("image/"):
@@ -870,7 +870,7 @@ async def _process_media(user: User, media: TLInputMediaBase) -> MessageMedia:
         media_type = MediaType.DICE
 
     if isinstance(media, (InputMediaUploadedDocument, InputMediaUploadedDocument_133, InputMediaUploadedPhoto)):
-        uploaded_file = await UploadingFile.get_or_none(user=user, file_id=media.file.id)
+        uploaded_file = await UploadingFile.get_or_none(user=user, file_id=str(media.file.id))
         if uploaded_file is None:
             raise ErrorRpc(error_code=400, error_message="INPUT_FILE_INVALID")
 

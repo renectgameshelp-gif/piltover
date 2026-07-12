@@ -78,7 +78,7 @@ async def upload_profile_photo(request: UploadProfilePhoto, user: User):
 
     target_user = await _current_user_or_bot(request.bot, user)
 
-    uploaded_file = await UploadingFile.get_or_none(user=user, file_id=request.file.id)
+    uploaded_file = await UploadingFile.get_or_none(user=user, file_id=str(request.file.id))
     if uploaded_file is None:
         raise ErrorRpc(error_code=400, error_message="INPUT_FILE_INVALID")
     if uploaded_file.mime is None or not uploaded_file.mime.startswith("image/"):

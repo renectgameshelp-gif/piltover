@@ -109,6 +109,8 @@ async def create_chat(request: CreateChat, user_id: int) -> InvitedUsers:
 
     if isinstance(updates_msg, Updates):
         updates.updates.extend(updates_msg.updates)
+        updates.users.extend(updates_msg.users)
+        updates.chats.extend(updates_msg.chats)
 
     return InvitedUsers(
         updates=updates,
@@ -258,7 +260,7 @@ async def resolve_input_chat_photo(
     elif isinstance(photo, (InputChatUploadedPhoto, InputChatUploadedPhoto_133)):
         if photo.file is None:
             raise ErrorRpc(error_code=400, error_message="PHOTO_FILE_MISSING")
-        uploaded_file = await UploadingFile.get_or_none(user_id=user_id, file_id=photo.file.id)
+        uploaded_file = await UploadingFile.get_or_none(user_id=user_id, file_id=str(photo.file.id))
         if uploaded_file is None:
             raise ErrorRpc(error_code=400, error_message="INPUT_FILE_INVALID")
         if uploaded_file.mime is None or not uploaded_file.mime.startswith("image/"):
@@ -287,13 +289,18 @@ async def edit_chat_photo(request: EditChatPhoto, user_id: int) -> Updates:
 
     user = await User.get(id=user_id).only("id", "bot")
 
-    return await send_message_internal(
+    updates = await upd.update_chat(chat)
+    updates_msg = await send_message_internal(
         user, peer, None, None, False,
         author=user_id, type=MessageType.SERVICE_CHAT_EDIT_PHOTO,
         extra_info=MessageActionChatEditPhoto(
             photo=chat.photo.to_tl_photo() if chat.photo else PhotoEmpty(id=0),
         ).write(),
     )
+    updates.updates.extend(updates_msg.updates)
+    updates.users.extend(updates_msg.users)
+    updates.chats.extend(updates_msg.chats)
+    return updates
 
 
 @handler.on_request(AddChatUser, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
@@ -373,6 +380,8 @@ async def add_chat_user(request: AddChatUser, user_id: int) -> InvitedUsers:
 
     if isinstance(updates_msg, Updates):
         updates.updates.extend(updates_msg.updates)
+        updates.users.extend(updates_msg.users)
+        updates.chats.extend(updates_msg.chats)
 
     return InvitedUsers(
         updates=updates,

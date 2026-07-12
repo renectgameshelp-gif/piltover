@@ -157,7 +157,7 @@ async def _resolve_file(input_file: TLInputEncryptedFileBase, user_id: int) -> E
     ctx = request_ctx.get()
 
     if isinstance(input_file, (InputEncryptedFileUploaded, InputEncryptedFileBigUploaded)):
-        uploaded_file = await UploadingFile.get_or_none(user_id=user_id, file_id=input_file.id)
+        uploaded_file = await UploadingFile.get_or_none(user_id=user_id, file_id=str(input_file.id))
         if uploaded_file is None:
             raise ErrorRpc(error_code=400, error_message="FILE_EMTPY")
         file = await uploaded_file.finalize_upload(

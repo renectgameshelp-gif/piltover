@@ -35,8 +35,9 @@ async def save_file_part(request: SaveFilePart | SaveBigFilePart, user_id: int) 
         defaults["mime"] = mime
         logger.trace(f"Resolved file mime type from first part: {mime!r}")
 
+    file_id = str(request.file_id)
     with measure_time("UploadingFile.get_or_create(...)"):
-        file, created = await UploadingFile.get_or_create(user_id=user_id, file_id=request.file_id, defaults=defaults)
+        file, created = await UploadingFile.get_or_create(user_id=user_id, file_id=file_id, defaults=defaults)
         if not created and request.file_part == 0 and file.mime is None and mime is not None:
             file.mime = mime
             await file.save(update_fields=["mime"])
