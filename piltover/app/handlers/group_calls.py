@@ -20,11 +20,12 @@ from piltover.exceptions import ErrorRpc
 from piltover.tl import DataJSON, IntVector, Updates, UpdateGroupCall, UpdateGroupCallConnection, UpdateGroupCallParticipants
 from piltover.tl.functions.phone import (
     CheckGroupCall, CreateGroupCall, DiscardGroupCall, EditGroupCallParticipant, EditGroupCallTitle,
-    ExportGroupCallInvite, GetGroupCall, GetGroupCallJoinAs, GetGroupParticipants, JoinGroupCall,
+    ExportGroupCallInvite, GetGroupCall, GetGroupCallJoinAs, GetGroupCallStreamChannels,
+    GetGroupCallStreamRtmpUrl, GetGroupParticipants, JoinGroupCall,
     JoinGroupCall_133, LeaveGroupCall, SaveDefaultGroupCallJoinAs, StartScheduledGroupCall,
     ToggleGroupCallSettings,
 )
-from piltover.tl.types.phone import ExportedGroupCallInvite, GroupParticipants
+from piltover.tl.types.phone import ExportedGroupCallInvite, GroupCallStreamChannels, GroupParticipants
 from piltover.worker import MessageHandler
 
 handler = MessageHandler("phone")
@@ -494,3 +495,15 @@ async def export_group_call_invite(request: ExportGroupCallInvite, user_id: int)
             await group_call.save(update_fields=["invite_hash"])
         return ExportedGroupCallInvite(link=f"https://t.me/c/{group_call.id}/{group_call.invite_hash}")
     return ExportedGroupCallInvite(link=f"https://t.me/c/{group_call.id}")
+
+
+@handler.on_request(GetGroupCallStreamRtmpUrl, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
+async def get_group_call_stream_rtmp_url(request: GetGroupCallStreamRtmpUrl, user_id: int):
+    await resolve_chat_or_channel(user_id, request.peer)
+    raise ErrorRpc(error_code=400, error_message="GROUPCALL_INVALID")
+
+
+@handler.on_request(GetGroupCallStreamChannels, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
+async def get_group_call_stream_channels(request: GetGroupCallStreamChannels) -> GroupCallStreamChannels:
+    await GroupCall.get_from_input_raise(request.call)
+    return GroupCallStreamChannels(channels=[])
