@@ -759,15 +759,27 @@ async def reorder_sticker_sets(request: ReorderStickerSets, user_id: int) -> boo
 
 @handler.on_request(GetArchivedStickers, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
 async def get_archived_stickers(request: GetArchivedStickers, user_id: int) -> ArchivedStickers:
-    limit = max(1, min(50, request.limit))
+    base_filter = Q(user_id=user_id, archived=True, set__deleted=False)
+    if request.emojis:
+        base_filter &= Q(set__emoji=True)
+    elif request.masks:
+        base_filter &= Q(set__masks=True)
+    else:
+        base_filter &= Q(set__emoji=False, set__masks=False)
+
+    count = await InstalledStickerset.filter(base_filter).count()
+    if request.limit == 0:
+        return ArchivedStickers(count=count, sets=[])
+
+    limit = min(50, request.limit)
     id_filter = Q(set_id__lt=request.offset_id) if request.offset_id else Q()
-    installed_sets = await InstalledStickerset.filter(id_filter, user_id=user_id, archived=True, set__deleted=False)\
+    installed_sets = await InstalledStickerset.filter(id_filter, base_filter)\
         .select_related("set")\
         .order_by("-set_id")\
         .limit(limit)
 
     return ArchivedStickers(
-        count=await InstalledStickerset.filter(user_id=user_id, archived=True, set__deleted=False).count(),
+        count=count,
         sets=await _make_covered_list(user_id, [installed.set for installed in installed_sets])
     )
 
@@ -968,7 +980,7 @@ async def get_emoji_stickers(request: GetEmojiStickers, user_id: int) -> AllStic
         .select_related("set", "set__thumb")
     sets_hash = telegram_hash((stickerset.set.id for stickerset in sets), 64)
 
-    if sets_hash == request.hash:
+    if request.hash != 0 and sets_hash == request.hash:
         return AllStickersNotModified()
 
     return AllStickers(

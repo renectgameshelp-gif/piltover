@@ -29,7 +29,7 @@ from piltover.tl import PeerNotifySettings as TLPeerNotifySettings, GlobalPrivac
     AutoDownloadSettings, PasswordKdfAlgoSHA256SHA256PBKDF2HMACSHA512iter100000SHA256ModPow, Long, \
     UpdatesTooLong, DocumentAttributeFilename, TLObjectVector, InputWallPaperNoFile, InputChannelEmpty, \
     EmojiListNotModified, PrivacyValueDisallowAll, PrivacyValueAllowAll, PrivacyValueAllowContacts, String, \
-    EmojiStatusEmpty, EmojiStatus, \
+    EmojiStatusEmpty, EmojiStatus, ReactionsNotifySettings, NotificationSoundDefault, ReactionNotificationsFromAll, \
     GlobalPrivacySettings_200, InputFile, InputFileBig, WallPaperSettings
 from piltover.tl.base.account import ResetPasswordResult
 from piltover.tl.base import User as TLUserBase, WallPaper as TLWallPaperBase
@@ -43,10 +43,10 @@ from piltover.tl.functions.account import UpdateStatus, UpdateProfile, GetNotify
     ChangePhone, DeleteAccount, GetChatThemes, UploadWallPaper_133, UploadWallPaper, GetWallPaper, GetMultiWallPapers, \
     SaveWallPaper, InstallWallPaper, GetWallPapers, ResetWallPapers, UpdateColor, GetDefaultBackgroundEmojis, \
     UpdatePersonalChannel, UpdateNotifySettings, SetGlobalPrivacySettings, SendConfirmPhoneCode, ConfirmPhone, \
-    UpdateEmojiStatus
-from piltover.tl.types.account import EmojiStatuses, Themes, ContentSettings, PrivacyRules, Password, Authorizations, \
-    SavedRingtones, AutoDownloadSettings as AccAutoDownloadSettings, WebAuthorizations, PasswordSettings, \
-    ResetPasswordOk, ResetPasswordRequestedWait, ThemesNotModified, WallPapersNotModified, WallPapers
+    UpdateEmojiStatus, GetReactionsNotifySettings, GetRecentEmojiStatuses
+from piltover.tl.types.account import EmojiStatuses, EmojiStatusesNotModified, Themes, ContentSettings, PrivacyRules, \
+    Password, Authorizations, SavedRingtones, AutoDownloadSettings as AccAutoDownloadSettings, WebAuthorizations, \
+    PasswordSettings, ResetPasswordOk, ResetPasswordRequestedWait, ThemesNotModified, WallPapersNotModified, WallPapers
 from piltover.tl.types.auth import SentCode as TLSentCode, SentCodeTypeSms
 from piltover.tl.types.internal import SetSessionInternalPush
 from piltover.utils import gen_safe_prime
@@ -340,6 +340,26 @@ async def get_notify_settings(request: GetNotifySettings, user_id: int) -> TLPee
 @handler.on_request(GetDefaultEmojiStatuses, ReqHandlerFlags.AUTH_NOT_REQUIRED | ReqHandlerFlags.BOT_NOT_ALLOWED)
 async def get_default_emoji_statuses():  # pragma: no cover
     return EmojiStatuses(hash=0, statuses=[])
+
+
+@handler.on_request(GetRecentEmojiStatuses, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
+async def get_recent_emoji_statuses(
+        request: GetRecentEmojiStatuses,
+) -> EmojiStatuses | EmojiStatusesNotModified:  # pragma: no cover
+    statuses_hash = 0
+    if request.hash != 0 and statuses_hash == request.hash:
+        return EmojiStatusesNotModified()
+    return EmojiStatuses(hash=statuses_hash, statuses=[])
+
+
+@handler.on_request(GetReactionsNotifySettings, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
+async def get_reactions_notify_settings() -> ReactionsNotifySettings:  # pragma: no cover
+    return ReactionsNotifySettings(
+        messages_notify_from=ReactionNotificationsFromAll(),
+        stories_notify_from=ReactionNotificationsFromAll(),
+        sound=NotificationSoundDefault(),
+        show_previews=True,
+    )
 
 
 @handler.on_request(GetSavedRingtones, ReqHandlerFlags.AUTH_NOT_REQUIRED | ReqHandlerFlags.BOT_NOT_ALLOWED)
