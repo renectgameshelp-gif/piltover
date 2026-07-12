@@ -120,7 +120,15 @@ async def send_message(
             updates.updates.insert(0, UpdateMessageID(id=message.id, random_id=message.random_id))
 
         if target_user_id == current_user_id:
-            result = updates
+            # Sender already has optimistic content locally; only map random_id -> real id.
+            if message.random_id:
+                result = UpdatesWithDefaults(
+                    updates=[UpdateMessageID(id=message.id, random_id=message.random_id)],
+                    users=users,
+                    chats=chats_and_channels,
+                )
+            else:
+                result = updates
 
         ignore_auth_id = request_ctx.get().auth_id if ignore_current and target_user_id == current_user_id else None
         outbound.append((updates, target_user_id, ignore_auth_id))
@@ -159,6 +167,9 @@ async def send_message_channel(user_id: int, channel: Channel, message: MessageR
         replies=message_for_user.replies,
     )
 
+    ctx = request_ctx.get()
+    sender_auth_id = ctx.auth_id if ctx else None
+
     await SessionManager.send(
         UpdatesWithDefaults(
             updates=[
@@ -177,21 +188,24 @@ async def send_message_channel(user_id: int, channel: Channel, message: MessageR
             chats=chats_and_channels,
         ),
         channel_id=channel.id,
+        ignore_auth_id=sender_auth_id,
     )
 
-    updates: list = [
-        UpdateNewChannelMessage(
-            message=message_for_user,
-            pts=new_pts,
-            pts_count=1,
-        ),
-    ]
-
     if message.random_id:
-        updates.insert(0, UpdateMessageID(id=message.id, random_id=message.random_id))
+        return UpdatesWithDefaults(
+            updates=[UpdateMessageID(id=message.id, random_id=message.random_id)],
+            users=users,
+            chats=chats_and_channels,
+        )
 
     return UpdatesWithDefaults(
-        updates=updates,
+        updates=[
+            UpdateNewChannelMessage(
+                message=message_for_user,
+                pts=new_pts,
+                pts_count=1,
+            ),
+        ],
         users=users,
         chats=chats_and_channels,
     )

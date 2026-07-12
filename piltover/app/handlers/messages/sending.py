@@ -301,20 +301,10 @@ async def send_message_internal(
 
     _, _, unread_count, _, _ = await ReadState.get_in_out_ids_and_unread(user.id, peer, True, True)
     if not unread_count:
-        if peer.type is PeerType.CHANNEL:
-            message = next(iter(messages.values()))
-            readstate_updates = await upd.update_read_history_inbox_channel(
-                user.id, peer.channel_id, message.id, 0, broadcast=False,
-            )
-        else:
-            message = messages[peer]
-            _, readstate_updates = await upd.update_read_history_inbox(peer, message.id, 0, broadcast=False)
-
+        message = next(iter(messages.values())) if peer.type is PeerType.CHANNEL else messages[peer]
         await ReadState.update_or_create(owner_id=user.id, peer_id=peer.id, defaults={
             "last_message_id": message.id,
         })
-
-        updates.updates.extend(readstate_updates.updates)
 
     return updates
 
@@ -323,31 +313,14 @@ async def get_updates_for_random_id(user_id: int, peer: Peer, random_id: int) ->
     if (message := await MessageRef.get_from_random_id(user_id, peer, random_id)) is None:
         return None
 
-    updates = upd.UpdatesWithDefaults(
+    return upd.UpdatesWithDefaults(
         updates=[
             UpdateMessageID(
                 id=message.id,
                 random_id=random_id,
             ),
-        ]
+        ],
     )
-
-    message_tl = await message.to_tl_maybecached(user_id)
-
-    if peer.type is PeerType.CHANNEL:
-        updates.updates.append(UpdateNewChannelMessage(
-            message=message_tl,
-            pts=peer.channel.pts,
-            pts_count=0,
-        ))
-    else:
-        updates.updates.append(UpdateNewMessage(
-            message=message_tl,
-            pts=await State.add_pts(user_id, 0),
-            pts_count=0,
-        ))
-
-    return updates
 
 
 SendMessageTypes = SendMessage_148 | SendMessage_176 | SendMessage | SendMedia_148 | SendMedia_176 | SendMedia \
