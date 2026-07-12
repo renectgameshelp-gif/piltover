@@ -485,7 +485,7 @@ class Client:
 
     @logger.catch
     async def worker(self):
-        logger.debug("Client connected: {addr}", addr=self.peername)
+        logger.info("Client connected: {addr}", addr=self.peername)
 
         loop = asyncio.get_running_loop()
         self.disconnect_timeout = asyncio.timeout(None)
