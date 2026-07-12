@@ -18,7 +18,8 @@ from piltover.tl.types import UpdateDeleteMessages, UpdatePinnedDialogs, UpdateD
     UpdateReadHistoryOutbox, UpdateFolderPeers, FolderPeer, UpdateChannel, UpdateReadChannelInbox, \
     UpdateMessagePoll, UpdateDialogFilter, UpdateEncryption, UpdateConfig, UpdateNewAuthorization, \
     UpdateNewStickerSet, UpdateStickerSets, UpdateStickerSetsOrder, UpdatePeerWallpaper, UpdateReadMessagesContents, \
-    UpdateDeleteScheduledMessages, UpdatePeerHistoryTTL, UpdateBotCallbackQuery, UpdateUserPhone, UpdateNotifySettings, \
+    UpdateDeleteScheduledMessages, UpdatePeerHistoryTTL, UpdateBotCallbackQuery, UpdateBotPrecheckoutQuery, \
+    UpdateUserPhone, UpdateNotifySettings, \
     UpdateSavedGifs, UpdateBotInlineQuery, UpdateRecentStickers, UpdateFavedStickers, UpdateSavedDialogPinned, \
     UpdatePinnedSavedDialogs, UpdatePrivacy, UpdateMessageID, UpdatePhoneCall, UpdateChannelAvailableMessages, \
     UpdateReadChannelOutbox, EmojiStatus, EmojiStatusEmpty, UpdateUserEmojiStatus
@@ -481,6 +482,21 @@ class Update(Model):
                     msg_id=query.message_id,
                     chat_instance=0,
                     data=query.data,
+                )
+
+            case UpdateType.BOT_PRECHECKOUT_QUERY:
+                query = await models.BotPrecheckoutQuery.get_or_none(id=self.related_id)
+                if query is None:
+                    return None
+
+                ucc.add_user(query.user_id)
+
+                return UpdateBotPrecheckoutQuery(
+                    query_id=query.id,
+                    user_id=query.user_id,
+                    payload=query.payload,
+                    currency=query.currency,
+                    total_amount=query.total_amount,
                 )
 
             case UpdateType.UPDATE_PHONE:

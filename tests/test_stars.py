@@ -17,11 +17,18 @@ async def test_grant_stars_records_inbound_transaction(client_with_auth) -> None
     assert tx is not None
     assert tx.inbound is True
     assert tx.stars_amount == 50
-    assert tx.peer_type is StarsTransactionPeerType.API
+    assert tx.peer_type is StarsTransactionPeerType.PEER
+    assert tx.peer_user_id is not None
 
     ucc = UsersChatsChannels()
-    tl_tx = tx.to_tl(ucc)
+    from piltover.app.utils.stars_manager import get_stars_bot_user_id
+    from piltover.db.models.stars_transaction import StarsTransactionRenderContext
+
+    render_ctx = StarsTransactionRenderContext(stars_bot_user_id=await get_stars_bot_user_id())
+    tl_tx = tx.to_tl(ucc, render_ctx)
     assert tl_tx.stars.amount == 50
+    users, _, _ = await ucc.resolve()
+    assert users
 
 
 @pytest.mark.asyncio

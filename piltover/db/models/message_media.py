@@ -9,10 +9,10 @@ from piltover.db import models
 from piltover.db.enums import MediaType, ChatBannedRights
 from piltover.exceptions import InvalidConstructorException
 from piltover.tl import MessageMediaUnsupported, MessageMediaPhoto, MessageMediaDocument, MessageMediaPoll, \
-    MessageMediaContact, MessageMediaGeo, MessageMediaDice
+    MessageMediaContact, MessageMediaGeo, MessageMediaDice, MessageMediaInvoice
 
 MessageMediaTypes = MessageMediaUnsupported | MessageMediaPhoto | MessageMediaDocument | MessageMediaPoll \
-                    | MessageMediaContact | MessageMediaGeo | MessageMediaDice
+                    | MessageMediaContact | MessageMediaGeo | MessageMediaDice | MessageMediaInvoice
 
 
 class MessageMedia(Model):
@@ -72,6 +72,18 @@ class MessageMedia(Model):
                 return MessageMediaUnsupported()
 
             return dice
+        elif self.type is MediaType.INVOICE:
+            if self.static_data is None:
+                logger.warning("Expected \"static_data\" to be non-null for invoice media type")
+                return MessageMediaUnsupported()
+            try:
+                invoice_data = self.static_data.split(b"\0", 1)[0]
+                invoice = MessageMediaInvoice.read(BytesIO(invoice_data))
+            except InvalidConstructorException as e:
+                logger.opt(exception=e).warning("Invalid \"static_data\" data for invoice media type")
+                return MessageMediaUnsupported()
+
+            return invoice
 
         return MessageMediaUnsupported()
 

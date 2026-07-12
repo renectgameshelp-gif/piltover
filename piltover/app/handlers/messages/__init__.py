@@ -1,6 +1,6 @@
 from piltover.worker import MessageHandler
 from . import stubs, sending, history, dialogs, other, chats, reactions, invites, saved_dialogs, polls, folders, \
-    secret, wallpaper, scheduled, bot_callbacks, gifs, emoji_groups
+    secret, wallpaper, scheduled, bot_callbacks, bot_payments, gifs, emoji_groups
 
 handler = MessageHandler("messages")
 handler.register_handler(stubs.handler)
@@ -18,5 +18,6 @@ handler.register_handler(secret.handler)
 handler.register_handler(wallpaper.handler)
 handler.register_handler(scheduled.handler)
 handler.register_handler(bot_callbacks.handler)
+handler.register_handler(bot_payments.handler)
 handler.register_handler(gifs.handler)
 handler.register_handler(emoji_groups.handler)

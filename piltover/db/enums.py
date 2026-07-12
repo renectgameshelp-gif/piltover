@@ -92,6 +92,7 @@ class MediaType(IntEnum):
     CONTACT = 3
     GEOPOINT = 4
     DICE = 5
+    INVOICE = 6
 
 
 class UpdateType(IntEnum):
@@ -147,6 +148,7 @@ class UpdateType(IntEnum):
     PIN_MESSAGES = 51
     UNPIN_MESSAGES = 52
     EMOJI_STATUS = 53
+    BOT_PRECHECKOUT_QUERY = 54
 
 
 class SecretUpdateType(IntEnum):
@@ -180,6 +182,7 @@ class MessageType(IntEnum):
     SERVICE_TOPIC_CREATE = 15
     SERVICE_TOPIC_EDIT = 16
     SERVICE_GROUP_CALL = 17
+    SERVICE_PAYMENT = 18
     SCHEDULED = 100
 
 
@@ -551,3 +554,4 @@ class StarsTransactionPeerType(IntEnum):
 class StarsPaymentPurpose(IntEnum):
     TOPUP = 1
     GIFT = 2
+    BOT_INVOICE = 3

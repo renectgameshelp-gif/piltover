@@ -12,6 +12,7 @@ from tortoise.transactions import in_transaction
 
 import piltover.app.utils.updates_manager as upd
 from piltover.app.bot_handlers import bots
+from piltover.app.utils.stars_manager import STARS_CURRENCY, _pack_invoice_static
 from piltover.app.utils.utils import process_message_entities, process_reply_markup, B64URL_STR_RE
 from piltover.config import APP_CONFIG, DICE_CONFIG
 from piltover.context import request_ctx
@@ -27,7 +28,8 @@ from piltover.tl import Updates, InputMediaUploadedDocument, InputMediaUploadedP
     InputMediaDocument, InputPeerEmpty, MessageActionPinMessage, InputMediaPoll, InputMediaUploadedDocument_133, \
     InputMediaDocument_133, TextWithEntities, InputMediaEmpty, MessageEntityMention, MessageEntityMentionName, \
     LongVector, DocumentAttributeFilename, InputMediaContact, MessageMediaContact, InputMediaGeoPoint, MessageMediaGeo, \
-    GeoPoint, InputGeoPoint, InputMediaDice, MessageMediaDice, DocumentAttributeAnimated, DocumentAttributeVideo, \
+    GeoPoint, InputGeoPoint, InputMediaDice, MessageMediaDice, InputMediaInvoice, MessageMediaInvoice, \
+    DocumentAttributeAnimated, DocumentAttributeVideo, \
     DocumentAttributeAudio, DocumentAttributeSticker, DocumentAttributeImageSize, InputPeerChannel, InputChannel, \
     InputReplyToMessage, UpdateNewChannelMessage, UpdateMessageID, UpdateNewMessage, \
     InputDocument, InputPhoto, InputFile, InputFileBig
@@ -818,7 +820,9 @@ async def _get_input_media_file(
 
 
 async def _process_media(user: User, media: TLInputMediaBase) -> MessageMedia:
-    if not isinstance(media, (*DocOrPhotoMedia, InputMediaPoll, InputMediaContact, InputMediaGeoPoint, InputMediaDice)):
+    if not isinstance(media, (
+            *DocOrPhotoMedia, InputMediaPoll, InputMediaContact, InputMediaGeoPoint, InputMediaDice, InputMediaInvoice,
+    )):
         raise ErrorRpc(error_code=400, error_message="MEDIA_INVALID")
 
     file: File | None = None
@@ -843,6 +847,12 @@ async def _process_media(user: User, media: TLInputMediaBase) -> MessageMedia:
         media_type = MediaType.GEOPOINT
     elif isinstance(media, InputMediaDice):
         media_type = MediaType.DICE
+    elif isinstance(media, InputMediaInvoice):
+        if not user.bot:
+            raise ErrorRpc(error_code=400, error_message="BOT_PAYMENTS_DISABLED")
+        if media.invoice.currency != STARS_CURRENCY:
+            raise ErrorRpc(error_code=400, error_message="CURRENCY_TOTAL_AMOUNT_INVALID")
+        media_type = MediaType.INVOICE
 
     if isinstance(media, (InputMediaUploadedDocument, InputMediaUploadedDocument_133, InputMediaUploadedPhoto)):
         uploaded_file = await UploadingFile.get_or_none(user=user, file_id=str(media.file.id))
@@ -991,6 +1001,16 @@ async def _process_media(user: User, media: TLInputMediaBase) -> MessageMedia:
             value=xorshift128plusrandint(1, DICE_CONFIG[media.emoticon][0]),
             emoticon=media.emoticon,
         ).write()
+    elif isinstance(media, InputMediaInvoice):
+        total_amount = sum(price.amount for price in media.invoice.prices)
+        invoice_tl = MessageMediaInvoice(
+            title=media.title,
+            description=media.description,
+            currency=media.invoice.currency,
+            total_amount=total_amount,
+            start_param=media.start_param or "",
+        )
+        static_data = _pack_invoice_static(invoice_tl, media.payload)
 
     return await MessageMedia.create(
         file=file,

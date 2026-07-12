@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import uuid4
 
 from tortoise import Model, fields
 
 from piltover.db import models
 from piltover.db.enums import StarsTransactionPeerType
+
 from piltover.tl import (
     StarsAmount, StarsTransaction as TLStarsTransaction, StarsTransactionPeer,
     StarsTransactionPeerFragment, StarsTransactionPeerAppStore, StarsTransactionPeerPlayMarket,
     StarsTransactionPeerPremiumBot, StarsTransactionPeerAds, StarsTransactionPeerAPI, PeerUser,
 )
 from piltover.utils.users_chats_channels import UsersChatsChannels
+
+
+@dataclass(slots=True)
+class StarsTransactionRenderContext:
+    stars_bot_user_id: int | None = None
 
 
 class StarsTransaction(Model):
@@ -29,6 +36,8 @@ class StarsTransaction(Model):
     description: str | None = fields.CharField(max_length=512, null=True, default=None)
     gift: bool = fields.BooleanField(default=False)
     refund: bool = fields.BooleanField(default=False)
+    msg_id: int | None = fields.IntField(null=True, default=None)
+    bot_payload: bytes | None = fields.BinaryField(null=True, default=None)
 
     user_id: int
     peer_user_id: int | None
@@ -42,7 +51,17 @@ class StarsTransaction(Model):
         signed_nanos = self.stars_nanos if self.inbound else -self.stars_nanos
         return StarsAmount(amount=signed_amount, nanos=signed_nanos)
 
-    def _peer_tl(self, ucc: UsersChatsChannels) -> StarsTransactionPeer | StarsTransactionPeerFragment | StarsTransactionPeerAppStore | StarsTransactionPeerPlayMarket | StarsTransactionPeerPremiumBot | StarsTransactionPeerAds | StarsTransactionPeerAPI:
+    def _resolve_peer_user_id(self, ctx: StarsTransactionRenderContext | None) -> int | None:
+        if self.peer_user_id is not None:
+            return self.peer_user_id
+        if self.peer_type is StarsTransactionPeerType.API and ctx is not None:
+            return ctx.stars_bot_user_id
+        return None
+
+    def _peer_tl(
+            self, ucc: UsersChatsChannels, ctx: StarsTransactionRenderContext | None = None,
+    ) -> StarsTransactionPeer | StarsTransactionPeerFragment | StarsTransactionPeerAppStore | StarsTransactionPeerPlayMarket | StarsTransactionPeerPremiumBot | StarsTransactionPeerAds | StarsTransactionPeerAPI:
+        peer_user_id = self._resolve_peer_user_id(ctx)
         match self.peer_type:
             case StarsTransactionPeerType.FRAGMENT:
                 return StarsTransactionPeerFragment()
@@ -51,25 +70,35 @@ class StarsTransaction(Model):
             case StarsTransactionPeerType.PLAY_MARKET:
                 return StarsTransactionPeerPlayMarket()
             case StarsTransactionPeerType.PREMIUM_BOT:
+                if peer_user_id is not None:
+                    ucc.add_user(peer_user_id)
+                    return StarsTransactionPeer(peer=PeerUser(user_id=peer_user_id))
                 return StarsTransactionPeerPremiumBot()
             case StarsTransactionPeerType.ADS:
                 return StarsTransactionPeerAds()
             case StarsTransactionPeerType.API:
+                if peer_user_id is not None:
+                    ucc.add_user(peer_user_id)
+                    return StarsTransactionPeer(peer=PeerUser(user_id=peer_user_id))
                 return StarsTransactionPeerAPI()
             case StarsTransactionPeerType.PEER:
-                if self.peer_user_id is not None:
-                    ucc.add_user(self.peer_user_id)
-                return StarsTransactionPeer(peer=PeerUser(user_id=self.peer_user_id or 0))
+                if peer_user_id is not None:
+                    ucc.add_user(peer_user_id)
+                return StarsTransactionPeer(peer=PeerUser(user_id=peer_user_id or 0))
         return StarsTransactionPeerFragment()
 
-    def to_tl(self, ucc: UsersChatsChannels) -> TLStarsTransaction:
+    def to_tl(
+            self, ucc: UsersChatsChannels, ctx: StarsTransactionRenderContext | None = None,
+    ) -> TLStarsTransaction:
         return TLStarsTransaction(
             id=self.transaction_id,
             stars=self.to_stars_amount(),
             date=self.date,
-            peer=self._peer_tl(ucc),
+            peer=self._peer_tl(ucc, ctx),
             title=self.title,
             description=self.description,
             gift=self.gift,
             refund=self.refund,
+            msg_id=self.msg_id,
+            bot_payload=self.bot_payload,
         )

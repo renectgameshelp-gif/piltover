@@ -10,7 +10,8 @@ from piltover.context import request_ctx
 from piltover.db.enums import UpdateType, PeerType, ChannelUpdateType, NotifySettingsNotPeerType
 from piltover.db.models import User, State, Update, MessageDraft, Peer, Dialog, Chat, Presence, \
     ChatParticipant, ChannelUpdate, Channel, Poll, DialogFolder, EncryptedChat, UserAuthorization, SecretUpdate, \
-    Stickerset, ChatWallpaper, CallbackQuery, PeerNotifySettings, InlineQuery, SavedDialog, PrivacyRule, MessageRef, \
+    Stickerset, ChatWallpaper, CallbackQuery, BotPrecheckoutQuery, PeerNotifySettings, InlineQuery, SavedDialog, \
+    PrivacyRule, MessageRef, \
     PhoneCall, UserEmojiStatus, Username
 from piltover.exceptions import Unreachable
 from piltover.session import SessionManager
@@ -25,6 +26,7 @@ from piltover.tl import Updates, UpdateNewMessage, UpdateMessageID, UpdateReadHi
     UpdateConfig, UpdateRecentReactions, UpdateNewAuthorization, UpdateNewStickerSet, UpdateStickerSets, \
     UpdateStickerSetsOrder, base, UpdatePeerWallpaper, UpdateReadMessagesContents, UpdateNewScheduledMessage, \
     UpdateDeleteScheduledMessages, UpdatePeerHistoryTTL, UpdateDeleteMessages, UpdateBotCallbackQuery, \
+    UpdateBotPrecheckoutQuery, \
     UpdateUserPhone, UpdateNotifySettings, UpdateSavedGifs, UpdateBotInlineQuery, UpdateRecentStickers, \
     UpdateFavedStickers, UpdateSavedDialogPinned, UpdatePinnedSavedDialogs, UpdatePrivacy, \
     UpdateChannelReadMessagesContents, UpdateChannelAvailableMessages, UpdatePhoneCall, UpdatePhoneCallSignalingData, \
@@ -1884,6 +1886,39 @@ async def migrate_chat(chat: Chat, channel: Channel, user_ids: list[int]) -> Upd
     await SessionManager.send(updates, user_id=user_ids)
 
     return updates
+
+
+async def bot_precheckout_query(bot_id: int, query: BotPrecheckoutQuery) -> None:
+    new_pts = await State.add_pts(bot_id, 1)
+
+    await Update.create(
+        user_id=bot_id,
+        update_type=UpdateType.BOT_PRECHECKOUT_QUERY,
+        pts=new_pts,
+        pts_count=1,
+        related_id=query.id,
+        related_ids=[],
+    )
+
+    ucc = UsersChatsChannels()
+    ucc.add_user(query.user_id)
+    users, chats, channels = await ucc.resolve()
+
+    updates = UpdatesWithDefaults(
+        updates=[
+            UpdateBotPrecheckoutQuery(
+                query_id=query.id,
+                user_id=query.user_id,
+                payload=query.payload,
+                currency=query.currency,
+                total_amount=query.total_amount,
+            )
+        ],
+        users=users,
+        chats=[*chats, *channels],
+    )
+
+    await SessionManager.send(updates, bot_id)
 
 
 async def bot_callback_query(bot_id: int, query: CallbackQuery) -> None:

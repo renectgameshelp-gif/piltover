@@ -21,11 +21,17 @@ class StarsPaymentForm(Model):
     gift_user: models.User | None = fields.ForeignKeyField(
         "models.User", null=True, default=None, related_name="stars_gift_forms",
     )
+    bot_user: models.User | None = fields.ForeignKeyField(
+        "models.User", null=True, default=None, related_name="stars_bot_invoice_forms",
+    )
+    message_id: int | None = fields.IntField(null=True, default=None)
+    payload: bytes | None = fields.BinaryField(null=True, default=None)
     created_at: datetime = fields.DatetimeField(auto_now_add=True)
     expires_at: datetime = fields.DatetimeField()
 
     user_id: int
     gift_user_id: int | None
+    bot_user_id: int | None
 
     @classmethod
     def gen_expires_at(cls) -> datetime:
@@ -34,7 +40,8 @@ class StarsPaymentForm(Model):
     @classmethod
     async def create_form(
             cls, user_id: int, purpose: StarsPaymentPurpose, stars: int, currency: str, amount: int,
-            gift_user_id: int | None = None,
+            gift_user_id: int | None = None, bot_user_id: int | None = None,
+            message_id: int | None = None, payload: bytes | None = None,
     ) -> StarsPaymentForm:
         return await cls.create(
             id=Snowflake.make_id(),
@@ -44,6 +51,9 @@ class StarsPaymentForm(Model):
             currency=currency,
             amount=amount,
             gift_user_id=gift_user_id,
+            bot_user_id=bot_user_id,
+            message_id=message_id,
+            payload=payload,
             expires_at=cls.gen_expires_at(),
         )
 
