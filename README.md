@@ -90,7 +90,11 @@ Setup:
     export GATEWAY_CONFIG=config.custom/gateway.toml
     export WORKER_CONFIG=config.custom/worker.toml
     ```
-7. Run:
+8. Setup database:
+    ```shell
+    poetry run python -m tortoise migrate
+    ```
+8. Run:
     ```shell
     poetry run python -m piltover.app.app
     ```
@@ -119,7 +123,7 @@ number/exponent. To extract it, you can use
 [this command](https://github.com/pyrogram/pyrogram/blob/b19764d5dc9e2d59a4ccbb7f520f78505800656b/pyrogram/crypto/rsa.py#L26):
 
 ```shell
-$ grep -v -- - data/secrets/pubkey.asc | tr -d \\n | base64 -d | openssl asn1parse -inform DER -i
+grep -v -- - data/secrets/pubkey.asc | tr -d \\n | base64 -d | openssl asn1parse -inform DER -i
 ```
 
 An example output would look like this:
