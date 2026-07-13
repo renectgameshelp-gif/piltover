@@ -1,7 +1,11 @@
 from tortoise import fields
 from tortoise import migrations
+from tortoise.backends.base.schema_generator import BaseSchemaGenerator
 from tortoise.fields.base import OnDelete
 from tortoise.migrations import operations as ops
+
+_schema_generator = BaseSchemaGenerator(None)
+_bot_user_fk_name = _schema_generator._get_fk_name("starspaymentform", "bot_user_id", "user", "id")
 
 
 class Migration(migrations.Migration):
@@ -19,14 +23,6 @@ class Migration(migrations.Migration):
             model_name='StarsTransaction',
             name='bot_payload',
             field=fields.BinaryField(null=True),
-        ),
-        ops.AddField(
-            model_name='StarsPaymentForm',
-            name='bot_user',
-            field=fields.ForeignKeyField(
-                'models.User', source_field='bot_user_id', null=True, db_constraint=True,
-                to_field='id', on_delete=OnDelete.SET_NULL, related_name='stars_bot_invoice_forms',
-            ),
         ),
         ops.AddField(
             model_name='StarsPaymentForm',
@@ -57,5 +53,18 @@ class Migration(migrations.Migration):
             ],
             options={'table': 'botprecheckoutquery', 'app': 'models', 'pk_attr': 'id'},
             bases=['Model'],
+        ),
+        ops.AddField(
+            model_name='StarsPaymentForm',
+            name='bot_user',
+            field=fields.ForeignKeyField(
+                'models.User', source_field='bot_user_id', null=True, db_constraint=True,
+                to_field='id', on_delete=OnDelete.SET_NULL, related_name='stars_bot_invoice_forms',
+            ),
+        ),
+        ops.RunSQL(
+            f"ALTER TABLE starspaymentform ADD CONSTRAINT {_bot_user_fk_name} "
+            f"FOREIGN KEY (bot_user_id) REFERENCES user(id) ON DELETE SET NULL",
+            reverse_sql=f"ALTER TABLE starspaymentform DROP FOREIGN KEY {_bot_user_fk_name}",
         ),
     ]

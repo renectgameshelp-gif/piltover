@@ -3,6 +3,7 @@ from __future__ import annotations
 from time import time
 from uuid import uuid4
 
+from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
 from piltover.context import request_ctx
@@ -102,12 +103,18 @@ async def fetch_transactions(
         offset_tx = await StarsTransaction.get_or_none(transaction_id=offset, user_id=wallet_user_id)
         if offset_tx is not None:
             if ascending:
-                query = query.filter(date__gt=offset_tx.date)
+                query = query.filter(
+                    Q(date__gt=offset_tx.date)
+                    | (Q(date=offset_tx.date) & Q(transaction_id__gt=offset_tx.transaction_id))
+                )
             else:
-                query = query.filter(date__lt=offset_tx.date)
+                query = query.filter(
+                    Q(date__lt=offset_tx.date)
+                    | (Q(date=offset_tx.date) & Q(transaction_id__lt=offset_tx.transaction_id))
+                )
 
-    order = "date" if ascending else "-date"
-    rows = await query.order_by(order).limit(limit + 1)
+    order = ("date", "transaction_id") if ascending else ("-date", "-transaction_id")
+    rows = await query.order_by(*order).limit(limit + 1)
     has_more = len(rows) > limit
     rows = rows[:limit]
     next_offset = rows[-1].transaction_id if has_more and rows else None
@@ -253,12 +260,23 @@ def _invoice_total_amount(invoice: Invoice) -> int:
 
 
 def _pack_invoice_static(invoice_tl: MessageMediaInvoice, payload: bytes) -> bytes:
-    return invoice_tl.write() + b"\0" + payload
+    invoice_bytes = invoice_tl.write()
+    return len(invoice_bytes).to_bytes(4, "little", signed=False) + invoice_bytes + payload
 
 
 def _unpack_invoice_static(data: bytes) -> tuple[MessageMediaInvoice, bytes]:
     from io import BytesIO
-    invoice_bytes, payload = data.split(b"\0", 1)
+
+    if len(data) < 4:
+        raise ErrorRpc(error_code=400, error_message="INVOICE_INVALID")
+
+    invoice_len = int.from_bytes(data[:4], "little", signed=False)
+    invoice_end = 4 + invoice_len
+    if invoice_end > len(data):
+        raise ErrorRpc(error_code=400, error_message="INVOICE_INVALID")
+
+    invoice_bytes = data[4:invoice_end]
+    payload = data[invoice_end:]
     return MessageMediaInvoice.read(BytesIO(invoice_bytes)), payload
 
 
@@ -320,11 +338,10 @@ async def _await_bot_precheckout(
     if bot.system:
         return
 
+    import piltover.app.bot_handlers.bots as builtin_bots
     import piltover.app.utils.updates_manager as upd
     from piltover.utils.snowflake import Snowflake
 
-    ctx = request_ctx.get()
-    pubsub = ctx.worker.pubsub
     query = await BotPrecheckoutQuery.create(
         id=Snowflake.make_id(),
         user_id=payer_user_id,
@@ -334,16 +351,23 @@ async def _await_bot_precheckout(
         total_amount=total_amount,
     )
 
-    topic = f"bot-precheckout-query/{query.id}"
-    await pubsub.listen(topic, None)
-    await upd.bot_precheckout_query(bot_user_id, query)
+    try:
+        if await builtin_bots.try_process_precheckout_query(query):
+            return
 
-    result = await pubsub.listen(topic, PRECHECKOUT_TIMEOUT_SECONDS)
-    await query.delete()
-    if result is None:
-        raise ErrorRpc(error_code=400, error_message="BOT_PRECHECKOUT_TIMEOUT")
-    if result != b"1":
-        raise ErrorRpc(error_code=400, error_message=result.decode("utf-8", errors="replace") or "PAYMENT_FAILED")
+        ctx = request_ctx.get()
+        pubsub = ctx.worker.pubsub
+        topic = f"bot-precheckout-query/{query.id}"
+        await pubsub.listen(topic, None)
+        await upd.bot_precheckout_query(bot_user_id, query)
+
+        result = await pubsub.listen(topic, PRECHECKOUT_TIMEOUT_SECONDS)
+        if result is None:
+            raise ErrorRpc(error_code=400, error_message="BOT_PRECHECKOUT_TIMEOUT")
+        if result != b"1":
+            raise ErrorRpc(error_code=400, error_message=result.decode("utf-8", errors="replace") or "PAYMENT_FAILED")
+    finally:
+        await BotPrecheckoutQuery.filter(id=query.id).delete()
 
 
 async def _send_bot_payment_messages(
@@ -416,6 +440,69 @@ async def _credit_stars(
         )
 
     return balance, tx
+
+
+async def _transfer_stars(
+        from_user_id: int,
+        to_user_id: int,
+        stars: int,
+        *,
+        from_peer_type: StarsTransactionPeerType,
+        to_peer_type: StarsTransactionPeerType,
+        title: str,
+        from_description: str | None = None,
+        to_description: str | None = None,
+        from_peer_user_id: int | None = None,
+        to_peer_user_id: int | None = None,
+        msg_id: int | None = None,
+        bot_payload: bytes | None = None,
+) -> tuple[UserStarsBalance, UserStarsBalance, StarsTransaction, StarsTransaction]:
+    if stars <= 0:
+        raise ErrorRpc(error_code=400, error_message="STARS_AMOUNT_INVALID")
+
+    async with in_transaction():
+        payer_balance = await UserStarsBalance.filter(user_id=from_user_id).select_for_update().first()
+        if payer_balance is None or payer_balance.amount < stars:
+            raise ErrorRpc(error_code=400, error_message="BALANCE_TOO_LOW")
+
+        recipient_balance = await UserStarsBalance.filter(user_id=to_user_id).select_for_update().first()
+        if recipient_balance is None:
+            recipient_balance = await UserStarsBalance.create(user_id=to_user_id, amount=0, nanos=0)
+
+        payer_balance.amount -= stars
+        recipient_balance.amount += stars
+        await payer_balance.save(update_fields=["amount"])
+        await recipient_balance.save(update_fields=["amount"])
+
+        now = int(time())
+        outbound_tx = await StarsTransaction.create(
+            transaction_id=StarsTransaction.gen_id(),
+            user_id=from_user_id,
+            stars_amount=stars,
+            inbound=False,
+            date=now,
+            peer_type=from_peer_type,
+            peer_user_id=from_peer_user_id,
+            title=title,
+            description=from_description,
+            msg_id=msg_id,
+            bot_payload=bot_payload,
+        )
+        inbound_tx = await StarsTransaction.create(
+            transaction_id=StarsTransaction.gen_id(),
+            user_id=to_user_id,
+            stars_amount=stars,
+            inbound=True,
+            date=now,
+            peer_type=to_peer_type,
+            peer_user_id=to_peer_user_id,
+            title=title,
+            description=to_description,
+            msg_id=msg_id,
+            bot_payload=bot_payload,
+        )
+
+    return payer_balance, recipient_balance, outbound_tx, inbound_tx
 
 
 async def _debit_stars(
@@ -540,6 +627,8 @@ async def _complete_bot_payment_form(
         raise ErrorRpc(error_code=400, error_message="INVOICE_INVALID")
     if form.stars != stars or form.bot_user_id != bot_user_id or form.message_id != message.id:
         raise ErrorRpc(error_code=400, error_message="INVOICE_INVALID")
+    if form.payload is not None and form.payload != payload:
+        raise ErrorRpc(error_code=400, error_message="INVOICE_INVALID")
 
     await _await_bot_precheckout(bot_user_id, user_id, payload, invoice_media.currency, stars)
     await form.delete()
@@ -548,24 +637,17 @@ async def _complete_bot_payment_form(
     peer = await Peer.from_input_peer_raise(user_id, invoice.peer)
     charge_id = uuid4().hex
 
-    payer_balance, _ = await _debit_stars(
+    payer_balance, _, _, _ = await _transfer_stars(
         user_id,
-        stars,
-        peer_type=StarsTransactionPeerType.PREMIUM_BOT,
-        title=invoice_media.title,
-        description=invoice_media.description,
-        peer_user_id=bot_user_id,
-        msg_id=message.id,
-        bot_payload=payload or None,
-    )
-    await _credit_stars(
         bot_user_id,
         stars,
-        inbound=True,
-        peer_type=StarsTransactionPeerType.PEER,
+        from_peer_type=StarsTransactionPeerType.PEER,
+        to_peer_type=StarsTransactionPeerType.PEER,
         title=invoice_media.title,
-        description=f"Payment from user {user_id}",
-        peer_user_id=user_id,
+        from_description=invoice_media.description,
+        to_description=f"Payment from user {user_id}",
+        from_peer_user_id=bot_user_id,
+        to_peer_user_id=user_id,
         msg_id=message.id,
         bot_payload=payload or None,
     )

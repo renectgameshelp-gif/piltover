@@ -77,8 +77,8 @@ class MessageMedia(Model):
                 logger.warning("Expected \"static_data\" to be non-null for invoice media type")
                 return MessageMediaUnsupported()
             try:
-                invoice_data = self.static_data.split(b"\0", 1)[0]
-                invoice = MessageMediaInvoice.read(BytesIO(invoice_data))
+                from piltover.app.utils.stars_manager import _unpack_invoice_static
+                invoice, _ = _unpack_invoice_static(self.static_data)
             except InvalidConstructorException as e:
                 logger.opt(exception=e).warning("Invalid \"static_data\" data for invoice media type")
                 return MessageMediaUnsupported()

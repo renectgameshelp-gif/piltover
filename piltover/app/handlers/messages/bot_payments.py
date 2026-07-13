@@ -31,6 +31,5 @@ async def set_bot_precheckout_results(request: SetBotPrecheckoutResults, user_id
             data = (request.error or "PAYMENT_FAILED").encode("utf-8")
 
         await ctx.worker.pubsub.notify(topic=f"bot-precheckout-query/{query.id}", data=data)
-        await query.delete()
 
     return True
