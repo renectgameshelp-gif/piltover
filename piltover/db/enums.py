@@ -322,8 +322,19 @@ BOTFATHER_STATE_TO_COMMAND_NAME = {
 }
 
 
+class AdminReportPeerType(IntEnum):
+    USER = 0
+    CHAT = 1
+    CHANNEL = 2
+    MESSAGE = 3
+
+
 class AdminBotState(IntEnum):
     WAIT_STARS_AMOUNT = 1
+    WAIT_SEARCH = 2
+    WAIT_TRANSFER_OWNER = 3
+    WAIT_MAKE_ADMIN = 4
+    WAIT_BOT_EDIT = 5
 
 
 class StickersBotState(IntEnum):

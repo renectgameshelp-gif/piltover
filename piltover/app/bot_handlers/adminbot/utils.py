@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import piltover.app.utils.updates_manager as upd
 from piltover.db.models import MessageRef, Peer, User
 from piltover.tl import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
 
 PAGE_SIZE = 8
 HOME = b"adm:home"
+HIDE = b"adm:act:hide"
 
 
 def _truncate(text: str, limit: int = 64) -> str:
@@ -40,10 +42,18 @@ def user_label(user: User, *, username: str | None = None) -> str:
 def home_keyboard() -> ReplyInlineMarkup:
     return ReplyInlineMarkup(rows=[
         KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="👥 Users", data=b"adm:users:0")]),
+        KeyboardButtonRow(buttons=[
+            KeyboardButtonCallback(text="🔍 Find user", data=b"adm:find:user"),
+            KeyboardButtonCallback(text="🗑 Deleted", data=b"adm:del:0"),
+        ]),
         KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="🛡 Admins", data=b"adm:admins:0")]),
         KeyboardButtonRow(buttons=[
             KeyboardButtonCallback(text="📢 Channels", data=b"adm:channels:0"),
             KeyboardButtonCallback(text="💬 Groups", data=b"adm:groups:0"),
+        ]),
+        KeyboardButtonRow(buttons=[
+            KeyboardButtonCallback(text="🤖 Bots", data=b"adm:bots:0"),
+            KeyboardButtonCallback(text="📩 Reports", data=b"adm:reports:0"),
         ]),
         KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="📊 Statistics", data=b"adm:stats")]),
     ])
@@ -83,3 +93,18 @@ async def send_bot_message(peer: Peer, text: str, keyboard: ReplyInlineMarkup | 
         message=text, reply_markup=keyboard.write() if keyboard else None,
     )
     return messages[peer]
+
+
+async def push_bot_message(peer: Peer, text: str, keyboard: ReplyInlineMarkup | None = None) -> MessageRef:
+    message = await send_bot_message(peer, text, keyboard)
+    await upd.send_message(peer.owner_id, {peer: message}, False)
+    return message
+
+
+def hide_row() -> KeyboardButtonRow:
+    return KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="Hide", data=HIDE)])
+
+
+async def hide_bot_message(peer: Peer, message: MessageRef) -> None:
+    await upd.delete_messages(peer.owner_id, {peer.owner_id: [message.id]})
+    await message.delete()

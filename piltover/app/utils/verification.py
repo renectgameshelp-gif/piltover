@@ -12,9 +12,12 @@ async def set_user_verified(user: User, verified: bool) -> bool:
     if user.verified == verified:
         return False
 
+    from piltover.db.models import State
+
     user.verified = verified
     await user.save(update_fields=["verified"])
     await user.inc_version()
+    await State.get_or_create(user=user, defaults={"pts": 0})
     await upd.update_user(user)
     return True
 

@@ -6,6 +6,11 @@ from piltover.exceptions import ErrorRpc
 ADMIN_ONLY_BOT_USERNAMES = frozenset({"admin"})
 
 
+async def is_builtin_admin_bot(bot_user: User) -> bool:
+    username = await bot_user.get_raw_username()
+    return username in ADMIN_ONLY_BOT_USERNAMES
+
+
 async def is_admin(user_id: int) -> bool:
     return await User.filter(id=user_id, admin=True, deleted=False).exists()
 

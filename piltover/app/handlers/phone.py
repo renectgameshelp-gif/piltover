@@ -8,6 +8,7 @@ from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
 import piltover.app.utils.updates_manager as upd
+from piltover.app.utils.spam_block import check_user_spam_blocked, peer_has_incoming_contact, user_spam_blocked
 from piltover.context import request_ctx
 from piltover.db.enums import PeerType, PrivacyRuleKeyType, CallDiscardReason, MessageType, CALL_DISCARD_REASON_TO_TL
 from piltover.db.models import MessageRef, User, Peer, PrivacyRule, UserAuthorization, PhoneCall
@@ -189,6 +190,11 @@ async def _send_call_service_messages(
 ) -> Updates | None:
     await call.fetch_related("from_user", "to_user")
 
+    if not call.from_user.bot and await user_spam_blocked(call.from_user):
+        caller_peer = await Peer.get_or_none(owner_id=call.from_user_id, user_id=call.to_user_id)
+        if caller_peer is None or not await peer_has_incoming_contact(caller_peer, call.from_user_id):
+            return None
+
     peer = await Peer.get_or_create_for_user(call.from_user_id, call.to_user, select_related=("user",))
 
     messages = await MessageRef.create_for_peer(
@@ -259,12 +265,16 @@ async def request_call(request: RequestCall | RequestCall_133, user: User) -> Ph
         user, request.user_id, "USER_ID_INVALID", peer_types=(PeerType.USER,),
         select_related=("user",),
     )
+    if peer.user.deleted:
+        raise ErrorRpc(error_code=400, error_message="INPUT_USER_DEACTIVATED")
     if peer.user.bot or peer.user.system:
         raise ErrorRpc(error_code=400, error_message="USER_ID_INVALID")
     if peer.blocked_at:
         raise ErrorRpc(error_code=403, error_message="USER_IS_BLOCKED")
     if not await PrivacyRule.has_access_to(user, peer.user, PrivacyRuleKeyType.PHONE_CALL):
         raise ErrorRpc(error_code=403, error_message="USER_PRIVACY_RESTRICTED")
+
+    await check_user_spam_blocked(user, peer)
 
     auth_id = cast(int, request_ctx.get().auth_id)
     this_auth = await UserAuthorization.get(user=user, id=auth_id)

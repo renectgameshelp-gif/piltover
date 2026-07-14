@@ -180,8 +180,10 @@ async def get_sponsored_messages() -> SponsoredMessages | SponsoredMessagesEmpty
     # )
 
 
-@handler.on_request(Report, ReqHandlerFlags.BOT_NOT_ALLOWED)
-async def report_message(request: Report) -> ReportResultChooseOption | ReportResultAddComment | ReportResultReported:
+@handler.on_request(Report, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
+async def report_message(
+        request: Report, user_id: int,
+) -> ReportResultChooseOption | ReportResultAddComment | ReportResultReported:
     if not request.id:
         raise ErrorRpc(error_code=400, error_message="MESSAGE_REQUIRED")
 
@@ -197,6 +199,34 @@ async def report_message(request: Report) -> ReportResultChooseOption | ReportRe
     if request.option == _OTHER_REPORT_OPTION and not request.message:
         return ReportResultAddComment(optional=True, option=request.option)
 
+    from piltover.app.utils.admin_reports import create_admin_report
+    from piltover.db.enums import AdminReportPeerType, PeerType
+    from piltover.db.models import Peer
+
+    peer = await Peer.from_input_peer_raise(user_id, request.peer)
+    if peer.type is PeerType.USER:
+        peer_type, peer_id = AdminReportPeerType.USER, peer.user_id
+    elif peer.type is PeerType.CHAT:
+        peer_type, peer_id = AdminReportPeerType.CHAT, peer.chat_id
+    elif peer.type is PeerType.CHANNEL:
+        peer_type, peer_id = AdminReportPeerType.CHANNEL, peer.channel_id
+    else:
+        return ReportResultReported()
+
+    reason = "other"
+    for label, reason_obj in _REPORT_OPTIONS:
+        if request.option == reason_obj.write():
+            reason = label.lower().replace(" ", "_")
+            break
+
+    await create_admin_report(
+        reporter_id=user_id,
+        peer_type=peer_type,
+        peer_id=peer_id,
+        reason=reason,
+        comment=request.message or None,
+        message_ids=list(request.id),
+    )
     return ReportResultReported()
 
 

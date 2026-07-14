@@ -1,18 +1,19 @@
 from io import BytesIO
 
 import pytest
-from pyrogram.errors import RPCError
+from pyrogram.errors import PeerFlood, RPCError
 from pyrogram.raw.functions.channels import CreateChannel
 from pyrogram.raw.functions.messages import CreateChat
-from pyrogram.raw.types import InputUser, UpdateNewMessage
+from pyrogram.raw.functions.phone import RequestCall
+from pyrogram.raw.types import InputUser, PhoneCallProtocol, UpdateNewMessage
 
 from piltover.app.bot_handlers.adminbot.callback_handler import adminbot_callback_query_handler
 from piltover.app.bot_handlers.adminbot.utils import send_bot_message
 from piltover.app.handlers.users import _PEER_FULL_USER_ONLY
-from piltover.app.utils.spam_block import check_spam_blocked_creation, check_user_spam_blocked, set_user_spam_blocked, \
-    user_spam_blocked
+from piltover.app.utils.spam_block import check_spam_blocked_creation, check_user_spam_blocked, peer_has_incoming_contact, \
+    set_user_spam_blocked, user_spam_blocked
 from piltover.db.enums import PeerType
-from piltover.db.models import Chat, ChatParticipant, MessageRef, Peer, User
+from piltover.db.models import Chat, ChatParticipant, MessageRef, Peer, User, UserAuthorization
 from piltover.exceptions import ErrorRpc
 from piltover.tl import Int
 from piltover.tl.serialization_context import SerializationContext
@@ -92,7 +93,8 @@ async def test_check_user_spam_blocked_blocks_regular_peer() -> None:
 
     with pytest.raises(ErrorRpc) as exc:
         await check_user_spam_blocked(blocked, peer)
-    assert exc.value.error_message == "USER_RESTRICTED"
+    assert exc.value.error_message == "PEER_FLOOD"
+    assert exc.value.error_code == 400
 
 
 @pytest.mark.asyncio
@@ -124,6 +126,49 @@ async def test_check_user_spam_blocked_allows_reply_to_incoming() -> None:
 
 
 @pytest.mark.asyncio
+async def test_check_user_spam_blocked_allows_follow_up_without_reply() -> None:
+    blocked = await User.create(phone_number="900000023", first_name="Blocked", spam_blocked=True)
+    target = await User.create(phone_number="900000024", first_name="Target", bot=False)
+    peer = await Peer.create(owner_id=blocked.id, user_id=target.id, type=PeerType.USER)
+    await peer.fetch_related("user")
+
+    await MessageRef.create_for_peer(peer, target, opposite=True, message="hi")
+    assert await peer_has_incoming_contact(peer, blocked.id)
+
+    await check_user_spam_blocked(blocked, peer)
+
+
+@pytest.mark.asyncio
+async def test_check_user_spam_blocked_allows_call_back_after_incoming_call() -> None:
+    from hashlib import sha1
+    from os import urandom
+
+    from piltover.db.models import AuthKey, PhoneCall, UserAuthorization
+    from piltover.tl import Long
+
+    blocked = await User.create(phone_number="900000025", first_name="Blocked", spam_blocked=True)
+    target = await User.create(phone_number="900000026", first_name="Target", bot=False)
+    peer = await Peer.create(owner_id=blocked.id, user_id=target.id, type=PeerType.USER)
+    await peer.fetch_related("user")
+
+    async def _make_auth(user: User) -> UserAuthorization:
+        key = urandom(256)
+        key_id = Long.read_bytes(sha1(key).digest()[-8:])
+        auth_key = await AuthKey.create(id=key_id, auth_key=key)
+        return await UserAuthorization.create(user=user, key=auth_key, ip="0.0.0.0", allow_call_requests=True)
+
+    target_auth = await _make_auth(target)
+    blocked_auth = await _make_auth(blocked)
+    await PhoneCall.create(
+        from_user=target, from_sess=target_auth, to_user=blocked, to_sess=blocked_auth,
+        g_a_hash=b"\x01" * 32, protocol=b"",
+    )
+
+    assert await peer_has_incoming_contact(peer, blocked.id)
+    await check_user_spam_blocked(blocked, peer)
+
+
+@pytest.mark.asyncio
 async def test_check_user_spam_blocked_blocks_cold_message() -> None:
     blocked = await User.create(phone_number="900000015", first_name="Blocked", spam_blocked=True)
     target = await User.create(phone_number="900000016", first_name="Target", bot=False)
@@ -132,7 +177,7 @@ async def test_check_user_spam_blocked_blocks_cold_message() -> None:
 
     with pytest.raises(ErrorRpc) as exc:
         await check_user_spam_blocked(blocked, peer)
-    assert exc.value.error_message == "USER_RESTRICTED"
+    assert exc.value.error_message == "PEER_FLOOD"
 
 
 @pytest.mark.asyncio
@@ -147,7 +192,7 @@ async def test_check_user_spam_blocked_blocks_reply_to_own_message() -> None:
 
     with pytest.raises(ErrorRpc) as exc:
         await check_user_spam_blocked(blocked, peer, reply_to_message_id=outgoing_ref.id)
-    assert exc.value.error_message == "USER_RESTRICTED"
+    assert exc.value.error_message == "PEER_FLOOD"
 
 
 @pytest.mark.asyncio
@@ -179,6 +224,91 @@ async def test_check_spam_blocked_creation_blocks_new_chat() -> None:
     with pytest.raises(ErrorRpc) as exc:
         await check_spam_blocked_creation(blocked)
     assert exc.value.error_message == "USER_RESTRICTED"
+
+
+@pytest.mark.asyncio
+async def test_spam_blocked_can_request_call_after_incoming_message() -> None:
+    async with TestClient(phone_number="123456789") as client1, TestClient(phone_number="1234567890") as client2:
+        await client1.resolve_user(client2, False)
+        await client2.resolve_user(client1, False)
+
+        caller = await User.get(phone_number=client1.phone_number)
+        target = await User.get(phone_number=client2.phone_number)
+        await set_user_spam_blocked(caller, True)
+
+        await client2.send_message(client1.me.id, "stranger says hi")
+
+        auth = await UserAuthorization.filter(user_id=caller.id).first()
+        assert auth is not None
+        access_hash = User.make_access_hash(caller.id, auth.id, target.id)
+
+        result = await client1.invoke(RequestCall(
+            user_id=InputUser(user_id=target.id, access_hash=access_hash),
+            random_id=54322,
+            g_a_hash=b"\x00" * 32,
+            protocol=PhoneCallProtocol(
+                udp_p2p=True, udp_reflector=True, min_layer=92, max_layer=92, library_versions=["2.7.7"],
+            ),
+        ))
+        assert result is not None
+
+        await set_user_spam_blocked(caller, False)
+
+
+@pytest.mark.asyncio
+async def test_spam_blocked_can_reply_after_incoming_message() -> None:
+    async with TestClient(phone_number="123456789") as client1, TestClient(phone_number="1234567890") as client2:
+        await client1.resolve_user(client2, False)
+        await client2.resolve_user(client1, False)
+
+        await client2.send_message(client1.me.id, "hello from stranger")
+
+        user = await User.get(phone_number=client1.phone_number)
+        await set_user_spam_blocked(user, True)
+
+        message = await client1.send_message(client2.me.id, "allowed reply")
+        assert message.text == "allowed reply"
+
+        await set_user_spam_blocked(user, False)
+
+
+@pytest.mark.asyncio
+async def test_spam_blocked_cannot_request_call() -> None:
+    async with TestClient(phone_number="123456789") as client1, TestClient(phone_number="1234567890") as client2:
+        caller = await User.get(phone_number=client1.phone_number)
+        target = await User.get(phone_number=client2.phone_number)
+        await set_user_spam_blocked(caller, True)
+
+        auth = await UserAuthorization.filter(user_id=caller.id).first()
+        assert auth is not None
+        access_hash = User.make_access_hash(caller.id, auth.id, target.id)
+        await Peer.create(owner_id=caller.id, user_id=target.id, type=PeerType.USER)
+
+        with pytest.raises(PeerFlood):
+            await client1.invoke(RequestCall(
+                user_id=InputUser(user_id=target.id, access_hash=access_hash),
+                random_id=54321,
+                g_a_hash=b"\x00" * 32,
+                protocol=PhoneCallProtocol(
+                    udp_p2p=True, udp_reflector=True, min_layer=92, max_layer=92, library_versions=["2.7.7"],
+                ),
+            ))
+
+        await set_user_spam_blocked(caller, False)
+
+
+@pytest.mark.asyncio
+async def test_spam_blocked_send_message_returns_peer_flood() -> None:
+    async with TestClient(phone_number="123456789") as client1, TestClient(phone_number="1234567890") as client2:
+        await client2.set_username("spam_block_target")
+
+        user = await User.get(phone_number=client1.phone_number)
+        await set_user_spam_blocked(user, True)
+
+        with pytest.raises(PeerFlood):
+            await client1.send_message("spam_block_target", "blocked cold message")
+
+        await set_user_spam_blocked(user, False)
 
 
 @pytest.mark.asyncio

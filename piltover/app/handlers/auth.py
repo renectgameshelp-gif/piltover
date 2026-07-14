@@ -71,6 +71,10 @@ def _validate_phone(phone_number: str) -> str:
 
 async def _send_or_resend_code(phone_number: str, code_hash: str | None) -> TLSentCode:
     phone_number = _validate_phone(phone_number)
+    from piltover.app.utils.admin_delete_user import is_phone_banned
+    if await is_phone_banned(phone_number):
+        raise ErrorRpc(error_code=400, error_message="PHONE_NUMBER_BANNED")
+
     auth_key_id = _auth_key_id()
     client_ip = _client_ip()
     await check_send_code_allowed(client_ip, auth_key_id)
@@ -173,6 +177,9 @@ async def sign_up(request: SignUp | SignUp_133):
     if len(request.phone_code_hash) != SentCode.CODE_HASH_SIZE:
         raise ErrorRpc(error_code=400, error_message="PHONE_CODE_INVALID")
     phone_number = _validate_phone(request.phone_number)
+    from piltover.app.utils.admin_delete_user import is_phone_banned
+    if await is_phone_banned(phone_number):
+        raise ErrorRpc(error_code=400, error_message="PHONE_NUMBER_BANNED")
 
     code = await SentCode.get_(phone_number, request.phone_code_hash, PhoneCodePurpose.SIGNUP)
     if code := await SentCode.check_raise_cls(code, None):

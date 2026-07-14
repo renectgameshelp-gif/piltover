@@ -3,16 +3,20 @@ from __future__ import annotations
 from piltover.app.bot_handlers.adminbot.callback_data import (
     back_list_data,
     encode_list_key,
+    encode_user_list_key,
     stars_action,
     user_action,
     user_link,
+    users_list_callback,
 )
 from piltover.app.bot_handlers.adminbot.utils import (
     HOME,
     PAGE_SIZE,
     back_home_row,
+    hide_row,
     home_keyboard,
     list_keyboard,
+    push_bot_message,
     user_label,
 )
 from piltover.app.bot_handlers.typetestbot.common import edit_bot_message
@@ -52,29 +56,43 @@ def _user_nav_row(list_key: str) -> KeyboardButtonRow:
     ])
 
 
-async def page_users(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
-    users = list(
-        await User.filter(bot=False, system=False, deleted=False).order_by("-id")
-    )
-    total = len(users)
-    list_key = encode_list_key("u", page)
-    if total == 0:
-        return await edit_bot_message(menu, peer, "No users found.", list_keyboard(
-            items=[], page=0, total_pages=1, page_prefix=b"adm:users",
-        ))
+async def _fetch_users(*, show_system: bool) -> list[User]:
+    query = User.filter(bot=False, deleted=False)
+    if not show_system:
+        query = query.filter(system=False)
+    return list(await query.order_by("-system", "-id"))
 
-    total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
+
+async def page_users(peer: Peer, page: int, menu: MessageRef, *, show_system: bool = False) -> MessageRef:
+    users = await _fetch_users(show_system=show_system)
+    total = len(users)
+
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE) if total else 1
     page = max(0, min(page, total_pages - 1))
-    list_key = encode_list_key("u", page)
-    chunk = users[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    list_key = encode_user_list_key(page, show_system=show_system)
+    chunk = users[page * PAGE_SIZE:(page + 1) * PAGE_SIZE] if total else []
     usernames = await _usernames_for_users(chunk)
 
+    scope = "all users" if show_system else "regular users"
     items = [
         (user_label(user, username=usernames.get(user.id)), user_link(user.id, list_key))
         for user in chunk
     ]
-    text = f"Users ({total}). Tap to manage:"
-    keyboard = list_keyboard(items=items, page=page, total_pages=total_pages, page_prefix=b"adm:users")
+    text = f"👥 Users ({total}, {scope}). Tap to manage:"
+    page_prefix = b"adm:users:sys" if show_system else b"adm:users"
+    keyboard = list_keyboard(
+        items=items, page=page, total_pages=total_pages, page_prefix=page_prefix,
+    )
+    toggle_label = "✅ Show system" if show_system else "☑️ Show system"
+    keyboard.rows.insert(0, KeyboardButtonRow(buttons=[
+        KeyboardButtonCallback(text="🔍 Find", data=b"adm:find:user"),
+        KeyboardButtonCallback(text=toggle_label, data=users_list_callback(page, show_system=not show_system)),
+    ]))
+    keyboard.rows.insert(0, KeyboardButtonRow(buttons=[
+        KeyboardButtonCallback(text="🗑 Deleted accounts", data=b"adm:del:0"),
+    ]))
+    if total == 0:
+        text = f"👥 No users ({scope})."
     return await edit_bot_message(menu, peer, text, keyboard)
 
 
@@ -111,6 +129,7 @@ async def page_channels(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
 
     total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
     page = max(0, min(page, total_pages - 1))
+    list_key = encode_list_key("c", page)
     chunk = channels[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
 
     items: list[tuple[str, bytes]] = []
@@ -118,14 +137,13 @@ async def page_channels(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
         kind = "channel" if channel.channel else "supergroup"
         badge = " ✓" if channel.verified else ""
         label = f"[{kind}] {channel.name}{badge}"
-        if channel.verified:
-            data = f"adm:act:uv:ch:{channel.id}".encode()
-        else:
-            data = f"adm:act:v:ch:{channel.id}".encode()
-        items.append((label[:64], data))
+        items.append((label[:64], f"adm:ch:{channel.id}:{list_key}".encode()))
 
-    text = f"Channels & supergroups ({total}). Tap to toggle verified:"
+    text = f"Channels & supergroups ({total}). Tap for profile:"
     keyboard = list_keyboard(items=items, page=page, total_pages=total_pages, page_prefix=b"adm:channels")
+    keyboard.rows.insert(0, KeyboardButtonRow(buttons=[
+        KeyboardButtonCallback(text="🔍 Find channel", data=b"adm:find:ch"),
+    ]))
     return await edit_bot_message(menu, peer, text, keyboard)
 
 
@@ -139,20 +157,20 @@ async def page_groups(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
 
     total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
     page = max(0, min(page, total_pages - 1))
+    list_key = encode_list_key("g", page)
     chunk = chats[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
 
     items: list[tuple[str, bytes]] = []
     for chat in chunk:
         badge = " ✓" if chat.verified else ""
         label = f"[group] {chat.name}{badge}"
-        if chat.verified:
-            data = f"adm:act:uv:g:{chat.id}".encode()
-        else:
-            data = f"adm:act:v:g:{chat.id}".encode()
-        items.append((label[:64], data))
+        items.append((label[:64], f"adm:gr:{chat.id}:{list_key}".encode()))
 
-    text = f"Basic groups ({total}). Tap to toggle verified:"
+    text = f"Basic groups ({total}). Tap for profile:"
     keyboard = list_keyboard(items=items, page=page, total_pages=total_pages, page_prefix=b"adm:groups")
+    keyboard.rows.insert(0, KeyboardButtonRow(buttons=[
+        KeyboardButtonCallback(text="🔍 Find group", data=b"adm:find:gr"),
+    ]))
     return await edit_bot_message(menu, peer, text, keyboard)
 
 
@@ -165,14 +183,19 @@ async def page_stats(peer: Peer, menu: MessageRef) -> MessageRef:
     groups = await Chat.filter(deleted=False, migrated=False).count()
     verified_users = await User.filter(verified=True, deleted=False).count()
     spam_blocked = await User.filter(spam_blocked=True, bot=False, deleted=False).count()
+    deleted_accounts = await User.filter(deleted=True, system=False).count()
+    from piltover.db.models import AdminReport
+    pending_reports = await AdminReport.filter(reviewed=False).count()
 
     text = (
         "📊 Server statistics\n\n"
         f"Users: {users}\n"
         f"Bots: {bots}\n"
         f"Admins: {admins}\n"
+        f"Deleted accounts: {deleted_accounts}\n"
         f"Verified users: {verified_users}\n"
         f"Spam blocked: {spam_blocked}\n"
+        f"Pending reports: {pending_reports}\n"
         f"Channels: {channels}\n"
         f"Supergroups: {supergroups}\n"
         f"Basic groups: {groups}"
@@ -181,10 +204,19 @@ async def page_stats(peer: Peer, menu: MessageRef) -> MessageRef:
     return await edit_bot_message(menu, peer, text, keyboard)
 
 
-async def page_user(peer: Peer, user_id: int, menu: MessageRef, *, list_key: str = "u0") -> MessageRef:
-    user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
+async def _get_user_profile(user_id: int) -> User | None:
+    return await User.get_or_none(id=user_id, bot=False, deleted=False)
+
+
+async def page_user(
+        peer: Peer, user_id: int, menu: MessageRef, *, list_key: str = "u0", overlay: bool = False,
+) -> MessageRef:
+    user = await _get_user_profile(user_id)
     if user is None:
-        return await edit_bot_message(menu, peer, "User not found.", ReplyInlineMarkup(rows=[back_home_row()]))
+        markup = ReplyInlineMarkup(rows=[back_home_row()])
+        if overlay:
+            return await push_bot_message(peer, "User not found.", markup)
+        return await edit_bot_message(menu, peer, "User not found.", markup)
 
     username = await user.get_raw_username()
     stars = await _stars_amount(user.id)
@@ -195,26 +227,31 @@ async def page_user(peer: Peer, user_id: int, menu: MessageRef, *, list_key: str
         f"👤 {user.first_name}" + (f" {user.last_name}" if user.last_name else ""),
         f"ID: {user.id}",
     ]
+    if user.system:
+        lines.append("Type: service account ⚙")
     if username:
         lines.append(f"Username: @{username}")
     if user.phone_number:
         lines.append(f"Phone: {user.phone_number}")
     lines.append(f"Admin: {'yes' if user.admin else 'no'}")
-    lines.append(f"Verified: {'yes' if user.verified else 'no'}")
-    lines.append(f"Spam blocked: {'yes' if user.spam_blocked else 'no'}")
-    lines.append(f"Stars: ⭐ {stars}")
+    lines.append(f"Verified: {'yes ✓' if user.verified else 'no'}")
+    if not user.system:
+        lines.append(f"Spam blocked: {'yes' if user.spam_blocked else 'no'}")
+        lines.append(f"Stars: ⭐ {stars}")
     lines.append(f"Sessions: {len(sessions)}")
-    lines.append(f"Admin memberships: {len(memberships)}")
+    if not user.system:
+        lines.append(f"Admin memberships: {len(memberships)}")
 
     rows: list[KeyboardButtonRow] = []
-    if user.admin:
-        rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Revoke admin", data=user_action("unadmin", user.id, list_key)),
-        ]))
-    else:
-        rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Grant admin", data=user_action("admin", user.id, list_key)),
-        ]))
+    if not user.system:
+        if user.admin:
+            rows.append(KeyboardButtonRow(buttons=[
+                KeyboardButtonCallback(text="Revoke admin", data=user_action("unadmin", user.id, list_key)),
+            ]))
+        else:
+            rows.append(KeyboardButtonRow(buttons=[
+                KeyboardButtonCallback(text="Grant admin", data=user_action("admin", user.id, list_key)),
+            ]))
 
     if user.verified:
         rows.append(KeyboardButtonRow(buttons=[
@@ -225,29 +262,42 @@ async def page_user(peer: Peer, user_id: int, menu: MessageRef, *, list_key: str
             KeyboardButtonCallback(text="Grant checkmark", data=user_action("verify", user.id, list_key)),
         ]))
 
-    if user.spam_blocked:
+    if not user.system:
+        if user.spam_blocked:
+            rows.append(KeyboardButtonRow(buttons=[
+                KeyboardButtonCallback(text="Remove spam block", data=user_action("unspam", user.id, list_key)),
+            ]))
+        else:
+            rows.append(KeyboardButtonRow(buttons=[
+                KeyboardButtonCallback(text="Apply spam block", data=user_action("spam", user.id, list_key)),
+            ]))
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Remove spam block", data=user_action("unspam", user.id, list_key)),
+            KeyboardButtonCallback(text="⭐ Stars", data=f"adm:user:stars:{user.id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="📱 Sessions", data=f"adm:user:sess:{user.id}:{list_key}".encode()),
+        ]))
+        rows.append(KeyboardButtonRow(buttons=[
+            KeyboardButtonCallback(text="📋 Memberships", data=f"adm:user:mem:{user.id}:0:{list_key}".encode()),
+        ]))
+        rows.append(KeyboardButtonRow(buttons=[
+            KeyboardButtonCallback(text="🗑 Delete account", data=user_action("deluser", user.id, list_key)),
         ]))
     else:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Apply spam block", data=user_action("spam", user.id, list_key)),
+            KeyboardButtonCallback(text="📱 Sessions", data=f"adm:user:sess:{user.id}:{list_key}".encode()),
         ]))
+    if overlay:
+        rows.append(hide_row())
+    else:
+        rows.append(_user_nav_row(list_key))
 
-    rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="⭐ Stars", data=f"adm:user:stars:{user.id}:{list_key}".encode()),
-        KeyboardButtonCallback(text="📱 Sessions", data=f"adm:user:sess:{user.id}:{list_key}".encode()),
-    ]))
-    rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="📋 Memberships", data=f"adm:user:mem:{user.id}:0:{list_key}".encode()),
-    ]))
-    rows.append(_user_nav_row(list_key))
-
-    return await edit_bot_message(menu, peer, "\n".join(lines), ReplyInlineMarkup(rows=rows))
+    markup = ReplyInlineMarkup(rows=rows)
+    if overlay:
+        return await push_bot_message(peer, "\n".join(lines), markup)
+    return await edit_bot_message(menu, peer, "\n".join(lines), markup)
 
 
 async def page_user_stars(peer: Peer, user_id: int, menu: MessageRef, *, list_key: str = "u0") -> MessageRef:
-    user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
+    user = await _get_user_profile(user_id)
     if user is None:
         return await edit_bot_message(menu, peer, "User not found.", ReplyInlineMarkup(rows=[back_home_row()]))
 
@@ -276,7 +326,7 @@ async def page_user_stars(peer: Peer, user_id: int, menu: MessageRef, *, list_ke
 
 
 async def page_user_sessions(peer: Peer, user_id: int, menu: MessageRef, *, list_key: str = "u0") -> MessageRef:
-    user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
+    user = await _get_user_profile(user_id)
     if user is None:
         return await edit_bot_message(menu, peer, "User not found.", ReplyInlineMarkup(rows=[back_home_row()]))
 
@@ -308,7 +358,7 @@ async def page_user_sessions(peer: Peer, user_id: int, menu: MessageRef, *, list
 async def page_user_memberships(
         peer: Peer, user_id: int, page: int, menu: MessageRef, *, list_key: str = "u0",
 ) -> MessageRef:
-    user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
+    user = await _get_user_profile(user_id)
     if user is None:
         return await edit_bot_message(menu, peer, "User not found.", ReplyInlineMarkup(rows=[back_home_row()]))
 

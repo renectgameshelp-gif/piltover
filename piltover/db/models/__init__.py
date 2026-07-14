@@ -103,3 +103,6 @@ from .stars_transaction import StarsTransaction
 from .stars_payment_form import StarsPaymentForm
 from .bot_precheckout_query import BotPrecheckoutQuery
 from .admin_bot_state import AdminBotUserState
+from .blocked_phone import BlockedPhone
+from .admin_report import AdminReport
+from .deleted_account_snapshot import DeletedAccountSnapshot

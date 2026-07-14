@@ -3,9 +3,12 @@ import warnings
 import piltover.app.utils.updates_manager as upd
 from piltover.db.enums import PeerType
 from piltover.db.models import User, Peer, MessageRef
+from piltover.tl.base import ReplyMarkup
 
 
-async def send_official_notification_message(user_id: int, text: str, entities: list | None) -> bool:
+async def send_official_notification_message(
+        user_id: int, text: str, entities: list | None, *, reply_markup: ReplyMarkup | None = None,
+) -> bool:
     system_user = await User.get_or_none(id=777000, system=True).only("id")
     if system_user is None:
         warnings.warn(
@@ -23,6 +26,7 @@ async def send_official_notification_message(user_id: int, text: str, entities: 
     message = await MessageRef.create_for_peer(
         peer_system, system_user, opposite=False, unhide_dialog=True,
         message=text, entities=entities,
+        reply_markup=reply_markup.write() if reply_markup is not None else None,
     )
 
     await upd.send_message(user_id, message, False)

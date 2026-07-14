@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tortoise.expressions import Q
+
 from piltover.db.enums import PeerType
-from piltover.db.models import MessageRef, User
+from piltover.db.models import MessageRef, PhoneCall, User
 from piltover.exceptions import ErrorRpc
 
 if TYPE_CHECKING:
@@ -47,10 +49,42 @@ async def _peer_allows_spam_blocked_send(peer: Peer, user_id: int) -> bool:
     return False
 
 
+async def peer_has_incoming_contact(peer: Peer, user_id: int) -> bool:
+    """True when the other party messaged or called this user first in the dialog."""
+    if peer.type is not PeerType.USER:
+        return False
+
+    other_id = peer.user_id
+    dialog_peers = Q(peer__owner_id=user_id, peer__user_id=other_id) | Q(
+        peer__owner_id=other_id, peer__user_id=user_id,
+    )
+    if await MessageRef.filter(
+            dialog_peers, peer__type=PeerType.USER, content__author_id=other_id,
+    ).exists():
+        return True
+
+    return await PhoneCall.filter(from_user_id=other_id, to_user_id=user_id).exists()
+
+
+async def _reply_to_incoming_message(
+        peer: Peer, user_id: int, reply_to_message_id: int,
+) -> bool:
+    reply_to = await MessageRef.get_or_none(
+        peer_id=peer.id, id=reply_to_message_id,
+    ).select_related("content")
+    if reply_to is None:
+        return False
+    return reply_to.content.author_id != user_id
+
+
 async def check_spam_blocked_creation(user: User) -> None:
     if user.bot or not await user_spam_blocked(user):
         return
     raise ErrorRpc(error_code=403, error_message="USER_RESTRICTED")
+
+
+def raise_spam_blocked_send_error() -> None:
+    raise ErrorRpc(error_code=400, error_message="PEER_FLOOD")
 
 
 async def check_user_spam_blocked(
@@ -65,15 +99,16 @@ async def check_user_spam_blocked(
             if peer.user.bot:
                 return
 
+            if await peer_has_incoming_contact(peer, user.id):
+                return
+
         if peer.type in (PeerType.CHAT, PeerType.CHANNEL):
             if await _peer_allows_spam_blocked_send(peer, user.id):
                 return
 
-        if reply_to_message_id is not None:
-            reply_to = await MessageRef.get_or_none(
-                peer=peer, id=reply_to_message_id,
-            ).select_related("content")
-            if reply_to is not None and reply_to.content.author_id != user.id:
-                return
+        if reply_to_message_id is not None and await _reply_to_incoming_message(
+                peer, user.id, reply_to_message_id,
+        ):
+            return
 
-    raise ErrorRpc(error_code=403, error_message="USER_RESTRICTED")
+    raise_spam_blocked_send_error()

@@ -69,6 +69,25 @@ async def test_adminbot_blocks_non_admin_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_adminbot_replies_to_plain_text() -> None:
+    async with TestClient(phone_number="123456789") as client:
+        admin_user = await User.get(phone_number=client.phone_number)
+        admin_user.admin = True
+        await admin_user.save(update_fields=["admin"])
+
+        bot = await client.get_users("admin")
+        await client.send_message(bot.id, "hello")
+
+        user_message = await client.expect_update(UpdateNewMessage)
+        bot_message = await client.expect_update(UpdateNewMessage)
+
+        if user_message.message.from_id.user_id != client.me.id:
+            user_message, bot_message = bot_message, user_message
+
+        assert "/start" in bot_message.message.message.lower()
+
+
+@pytest.mark.asyncio
 async def test_adminbot_grant_admin_callback() -> None:
     target = await User.create(phone_number="900000004", first_name="Target", admin=False)
 

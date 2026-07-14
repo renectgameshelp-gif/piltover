@@ -430,13 +430,15 @@ async def _create_peer_colors(colors_dir: Path) -> None:
 async def _create_system_user() -> None:
     logger.info("Creating system user...")
 
-    from piltover.db.models import User, Username
+    from piltover.db.models import State, User, Username
 
     sys_user, _ = await User.update_or_create(id=777000, defaults={
         "phone_number": "42777",
         "first_name": APP_CONFIG.name,
         "system": True,
+        "verified": True,
     })
+    await State.get_or_create(user=sys_user, defaults={"pts": 0})
 
     await Username.filter(Q(user=sys_user) | Q(username=APP_CONFIG.system_user_username)).delete()
     await Username.create(user=sys_user, username=APP_CONFIG.system_user_username)

@@ -18,10 +18,9 @@ from piltover.tl.types.internal_botfather import BotfatherStateNewbot, Botfather
 _bot_name_invalid = "Sorry, this isn't a proper name for a bot."
 _bot_wait_username = (
     "Good. Now let's choose a username for your bot. "
-    "It must end in `bot`. Like this, for example: TetrisBot or tetris_bot."
+    "Like this, for example: TetrisBot or tetris_bot."
 )
 _bot_username_invalid = "Sorry, this username is invalid."
-_bot_username_ends_bot = "Sorry, the username must end in `bot`. E.g. Tetris_bot or Tetrisbot."
 _bot_username_taken = "Sorry, this username is already taken. Please try something different."
 _bot_created = FormatableTextWithEntities("""
 Done! Congratulations on your new bot. You will find it at <a>t.me/{username}</a>. You can now add a description, about section and profile picture for your bot, see <c>/help</c> for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
@@ -100,8 +99,6 @@ class Text(BotInteractionHandler[BotFatherState, BotFatherUserState]):
         username = message.content.message
         if not is_username_valid(username):
             return await send_bot_message(peer, _bot_username_invalid)
-        if not username.endswith("bot"):
-            return await send_bot_message(peer, _bot_username_ends_bot)
         if await Username.filter(username=username).exists():
             return await send_bot_message(peer, _bot_username_taken)
 

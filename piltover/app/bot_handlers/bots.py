@@ -14,7 +14,7 @@ from piltover.app.bot_handlers.verifybot.callback_handler import verifybot_callb
 from piltover.app.bot_handlers.adminbot import AdminBotInteractionHandler
 from piltover.app.bot_handlers.adminbot.callback_handler import adminbot_callback_query_handler
 from piltover.app.bot_handlers.spambot import SpamBotInteractionHandler
-from piltover.app.utils.admin_access import ensure_admin_bot_access
+from piltover.app.utils.admin_access import ADMIN_ONLY_BOT_USERNAMES, is_admin
 from piltover.app.bot_handlers.stars_pay import StarsPayBotInteractionHandler
 from piltover.app.bot_handlers.stars_pay.callback_handler import stars_pay_callback_query_handler
 from piltover.app.bot_handlers.stickers import StickersBotInteractionHandler
@@ -99,19 +99,26 @@ async def process_message_to_bot(peer: Peer, message: MessageRef) -> MessageRef 
         return None
 
     bot_username = await peer.user.get_raw_username()
-    try:
-        await ensure_admin_bot_access(peer.owner_id, bot_username)
-    except ErrorRpc:
+    if bot_username in ADMIN_ONLY_BOT_USERNAMES and not await is_admin(peer.owner_id):
         return None
 
     handler = HANDLERS[bot_username]
 
     text = cast(str, message.content.message)
     if not text.startswith("/"):
-        return await handler.handle_text(peer, message)
+        result = await handler.handle_text(peer, message)
+    else:
+        command_name = text.split(" ", 1)[0][1:]
+        result = await handler.handle_command(command_name, peer, message)
 
-    command_name = text.split(" ", 1)[0][1:]
-    return await handler.handle_command(command_name, peer, message)
+    if result is None and bot_username == "admin":
+        from piltover.app.bot_handlers.adminbot.utils import home_keyboard, send_bot_message
+        return await send_bot_message(
+            peer,
+            "Unknown command. Send /start to open the admin panel.",
+            home_keyboard(),
+        )
+    return result
 
 
 async def process_callback_query(peer: Peer, message: MessageRef, data: bytes) -> BotCallbackAnswer | None:
@@ -121,9 +128,7 @@ async def process_callback_query(peer: Peer, message: MessageRef, data: bytes) -
         return None
 
     bot_username = await peer.user.get_raw_username()
-    try:
-        await ensure_admin_bot_access(peer.owner_id, bot_username)
-    except ErrorRpc:
+    if bot_username in ADMIN_ONLY_BOT_USERNAMES and not await is_admin(peer.owner_id):
         return None
 
     return await CALLBACK_QUERY_HANDLERS[bot_username](peer, message, data)
