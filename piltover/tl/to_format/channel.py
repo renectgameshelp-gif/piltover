@@ -82,6 +82,7 @@ class ChannelToFormat(types.ChannelToFormatInternal):
             banned_rights=participant.banned_rights.to_tl() if participant is not None else None,
             color=self.color,
             profile_color=self.profile_color,
+            verified=self.verified,
         ).write(ctx)
 
     def write(self, ctx: SerializationContext = EMPTY_SERIALIZATION_CONTEXT) -> bytes:

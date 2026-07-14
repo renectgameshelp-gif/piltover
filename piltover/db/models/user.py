@@ -48,6 +48,7 @@ class User(Model):
     profile_color: models.PeerColorOption | None = fields.ForeignKeyField("models.PeerColorOption", null=True, default=None, related_name="profile")
     history_ttl_days: int = fields.SmallIntField(default=0)
     read_dates_private: bool = fields.BooleanField(default=False)
+    verified: bool = fields.BooleanField(default=False)
     version: int = fields.IntField(default=0)
 
     accent_color_id: int | None
@@ -203,6 +204,7 @@ class User(Model):
             profile_color=profile_color,
             emoji_status=emoji_status.to_tl() if emoji_status is not None else None,
             last_seen=presence_last_seen,
+            verified=self.verified,
         )
 
         await Cache.obj.set(cache_key, result)
@@ -364,6 +366,7 @@ class User(Model):
                 profile_color=profile_color,
                 emoji_status=emoji_status.to_tl() if emoji_status is not None else None,
                 last_seen=int(presence.last_seen.timestamp()) if presence is not None else None,
+                verified=user.verified,
             ))
 
             to_cache.append((user._cache_key(), tl[-1]))

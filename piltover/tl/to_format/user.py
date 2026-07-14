@@ -64,6 +64,7 @@ class UserToFormat(types.UserToFormatInternal):
             profile_color=self.profile_color,
             mutual_contact=is_contact and current_is_contact,
             emoji_status=emoji_status,
+            verified=self.verified,
 
             premium=False,
         ).write(ctx)

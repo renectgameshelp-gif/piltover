@@ -4,9 +4,9 @@ from piltover.db.models import UserStarsBalance
 from piltover.enums import ReqHandlerFlags
 from piltover.tl import StarsTopupOption, TLObjectVector, StatsGraphError, StarsAmount, StarsRevenueStatus, UpdateStarsBalance
 from piltover.tl.functions.payments import (
-    GetStarsStatus, GetStarsStatusTon, GetStarsSubscriptions, GetStarsTransactions,
+    GetStarsStatus, GetStarsSubscriptions, GetStarsTransactions,
     GetStarsTransactions_181, GetStarsTransactions_182, GetStarsTransactionsByID,
-    GetStarsTransactionsByIDTon, GetStarsTopupOptions, GetPaymentForm, SendPaymentForm,
+    GetStarsTopupOptions, GetPaymentForm, SendPaymentForm,
     SendStarsForm, ValidateRequestedInfo, GetStarsRevenueStats, GetPaymentReceipt,
 )
 from piltover.tl.types.payments import StarsStatus, PaymentResult, ValidatedRequestedInfo, StarsRevenueStats, PaymentReceiptStars
@@ -38,11 +38,6 @@ async def _get_stars_status(peer: object, user_id: int) -> StarsStatus:
 
 @handler.on_request(GetStarsStatus, ReqHandlerFlags.BOT_NOT_ALLOWED)
 async def get_stars_status(request: GetStarsStatus, user_id: int) -> StarsStatus:
-    return await _get_stars_status(request.peer, user_id)
-
-
-@handler.on_request(GetStarsStatusTon, ReqHandlerFlags.BOT_NOT_ALLOWED)
-async def get_stars_status_ton(request: GetStarsStatusTon, user_id: int) -> StarsStatus:
     return await _get_stars_status(request.peer, user_id)
 
 
@@ -116,13 +111,6 @@ async def _get_stars_transactions_by_id(peer: object, user_id: int, transaction_
 
 @handler.on_request(GetStarsTransactionsByID, ReqHandlerFlags.BOT_NOT_ALLOWED)
 async def get_stars_transactions_by_id(request: GetStarsTransactionsByID, user_id: int) -> StarsStatus:
-    return await _get_stars_transactions_by_id(
-        request.peer, user_id, [item.id for item in request.id],
-    )
-
-
-@handler.on_request(GetStarsTransactionsByIDTon, ReqHandlerFlags.BOT_NOT_ALLOWED)
-async def get_stars_transactions_by_id_ton(request: GetStarsTransactionsByIDTon, user_id: int) -> StarsStatus:
     return await _get_stars_transactions_by_id(
         request.peer, user_id, [item.id for item in request.id],
     )
