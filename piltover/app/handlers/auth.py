@@ -187,10 +187,12 @@ async def sign_up(request: SignUp | SignUp_133):
     if request.last_name is not None and len(request.last_name) > 128:
         raise ErrorRpc(error_code=400, error_message="LASTNAME_INVALID")
 
+    make_admin = not await User.filter(admin=True, deleted=False).exists()
     user = await User.create(
         phone_number=phone_number,
         first_name=request.first_name,
-        last_name=request.last_name
+        last_name=request.last_name,
+        admin=make_admin,
     )
     await State.create(user=user)
     await PrivacyRule.create_defaults_for_user(user)

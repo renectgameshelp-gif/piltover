@@ -82,6 +82,8 @@ async def get_bot_callback_answer(request: GetBotCallbackAnswer, user_id: int) -
     if builtin_bot:
         if peer.type is not PeerType.USER:
             raise ErrorRpc(error_code=400, error_message="DATA_INVALID")
+        from piltover.app.utils.admin_access import ensure_admin_bot_access
+        await ensure_admin_bot_access(user_id, await message.content.author.get_raw_username())
         resp = await process_callback_query(peer, message, request.data)
         if resp is None:
             raise ErrorRpc(error_code=400, error_message="BOT_RESPONSE_TIMEOUT")

@@ -11,6 +11,9 @@ from piltover.app.bot_handlers.typetestbot import TypeTestBotInteractionHandler
 from piltover.app.bot_handlers.typetestbot.callback_handler import typetestbot_callback_query_handler
 from piltover.app.bot_handlers.verifybot import VerifyBotInteractionHandler
 from piltover.app.bot_handlers.verifybot.callback_handler import verifybot_callback_query_handler
+from piltover.app.bot_handlers.adminbot import AdminBotInteractionHandler
+from piltover.app.bot_handlers.adminbot.callback_handler import adminbot_callback_query_handler
+from piltover.app.utils.admin_access import ensure_admin_bot_access
 from piltover.app.bot_handlers.stars_pay import StarsPayBotInteractionHandler
 from piltover.app.bot_handlers.stars_pay.callback_handler import stars_pay_callback_query_handler
 from piltover.app.bot_handlers.stickers import StickersBotInteractionHandler
@@ -41,6 +44,7 @@ HANDLERS: dict[str, BotInteractionHandler] = {
     "premiumbot": PremiumBotInteractionHandler(),
     "typetestbot": TypeTestBotInteractionHandler(),
     "verifybot": VerifyBotInteractionHandler(),
+    "admin": AdminBotInteractionHandler(),
 }
 CALLBACK_QUERY_HANDLERS: dict[str, Callable[[Peer, MessageRef, bytes], Awaitable[BotCallbackAnswer | None]]] = {
     "botfather": botfather_callback_query_handler,
@@ -48,6 +52,7 @@ CALLBACK_QUERY_HANDLERS: dict[str, Callable[[Peer, MessageRef, bytes], Awaitable
     "stars_pay": stars_pay_callback_query_handler,
     "typetestbot": typetestbot_callback_query_handler,
     "verifybot": verifybot_callback_query_handler,
+    "admin": adminbot_callback_query_handler,
 }
 INLINE_QUERY_HANDLERS: dict[str, Callable[[InlineQuery], Awaitable[tuple[BotResults, bool] | None]]] = {
     "gif": gif_inline_query_handler,
@@ -92,6 +97,11 @@ async def process_message_to_bot(peer: Peer, message: MessageRef) -> MessageRef 
         return None
 
     bot_username = await peer.user.get_raw_username()
+    try:
+        await ensure_admin_bot_access(peer.owner_id, bot_username)
+    except ErrorRpc:
+        return None
+
     handler = HANDLERS[bot_username]
 
     text = cast(str, message.content.message)
@@ -109,6 +119,10 @@ async def process_callback_query(peer: Peer, message: MessageRef, data: bytes) -
         return None
 
     bot_username = await peer.user.get_raw_username()
+    try:
+        await ensure_admin_bot_access(peer.owner_id, bot_username)
+    except ErrorRpc:
+        return None
 
     return await CALLBACK_QUERY_HANDLERS[bot_username](peer, message, data)
 

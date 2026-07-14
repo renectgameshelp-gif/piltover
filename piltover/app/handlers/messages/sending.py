@@ -194,6 +194,10 @@ async def send_message_internal(
      `user` MUST have at least `id` and `bot` prefetched;
      `peer.user` must have `username` prefetched;
     """
+    if opposite and peer.type is PeerType.USER and peer.user.bot:
+        from piltover.app.utils.admin_access import ensure_admin_bot_access
+        await ensure_admin_bot_access(user.id, await peer.user.get_raw_username())
+
     if opposite \
             and peer.type is PeerType.USER \
             and peer.user.bot \

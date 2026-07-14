@@ -818,6 +818,7 @@ async def create_system_data(
             ("premiumbot", "Telegram Premium"),
             ("typetestbot", "Type Test Bot"),
             ("verifybot", "Verify Bot"),
+            ("admin", "Admin"),
         ])
 
     auth_countries_file = cast(Path, args.auth_countries_file)
