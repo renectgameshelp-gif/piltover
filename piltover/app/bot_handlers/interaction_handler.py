@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from abc import ABC, abstractmethod
 from typing import Callable, Awaitable, Generic, TypeVar, Optional, Self, Protocol
 
@@ -47,8 +48,11 @@ class SimpleHandler(HandlerBase[StateEnumT, StateT]):
         self._del_state = del_state
 
     async def __call__(self, peer: Peer, message: MessageRef, state: StateT | None) -> MessageRef | None:
-        if self._set_state is not None:
-            await state.update_state(self._set_state, None)
+        if state is not None:
+            if self._del_state:
+                await state.delete()
+            elif self._set_state is not None:
+                await state.update_state(self._set_state, None)
         if self._send_message is not None and self._respond_text is not None:
             return await self._send_message(peer, self._respond_text, entities=self._respond_entities)
 
@@ -97,13 +101,9 @@ class RegisterInteraction(Generic[StateEnumT, StateT]):
         return self._need_fetch_state
 
     def _clone(self) -> Self:
-        reg = self.__class__.__new__(self.__class__)
-        reg._int_handler = self._int_handler
+        reg = copy.copy(self)
         reg._handlers = self._handlers.copy()
-        reg._need_fetch_state = self._need_fetch_state
-        reg._otherwise = self._otherwise
         reg._pending = self._pending.clone()
-        reg._send_message_func = self._send_message_func
         return reg
 
     def register(self) -> None:
@@ -122,10 +122,16 @@ class RegisterInteraction(Generic[StateEnumT, StateT]):
 
     def fetch_state(self) -> Self:
         reg = self._clone()
-        reg._fetch_state = True
+        reg._need_fetch_state = True
         return reg
 
     def do(self, handler: HandlerFunc | None = None) -> Self:
+        """Register a handler function, or open a respond-only step.
+
+        With a handler, registers it immediately (``.do(fn).register()``).
+        Without a handler, resets pending state so ``.respond()`` can follow
+        ``.when()`` (``.do().respond("...").ok()``).
+        """
         reg = self._clone()
         if handler is not None:
             reg._handlers[reg._pending.state] = FuncHandler(handler)
@@ -163,12 +169,18 @@ class RegisterInteraction(Generic[StateEnumT, StateT]):
 
     def ok(self) -> Self:
         reg = self._clone()
+        if reg._pending.func is not None and reg._pending.respond_text is not None:
+            raise ValueError("Cannot combine a handler function and .respond() on the same step")
         if reg._pending.func is not None:
             if reg._pending.is_otherwise:
                 reg._otherwise = FuncHandler(reg._pending.func)
             else:
                 reg._handlers[reg._pending.state] = FuncHandler(reg._pending.func)
         elif reg._pending.respond_text is not None and self._send_message_func is not None:
+            if reg._otherwise is not None:
+                raise ValueError("Cannot combine .otherwise(handler) and .respond() on the same step")
+            if reg._pending.state in reg._handlers:
+                raise ValueError("Cannot combine .do(handler) and .respond() on the same step")
             handler = SimpleHandler(
                 set_state=reg._pending.set_state,
                 text=reg._pending.respond_text,
@@ -192,11 +204,6 @@ class RegisterCommand(RegisterInteraction[StateEnumT, StateT]):
     @property
     def name(self) -> str:
         return self._name
-
-    def _clone(self) -> Self:
-        reg = super()._clone()
-        reg._name = self._name
-        return reg
 
 
 class BotInteractionHandler(Generic[StateEnumT, StateT]):
