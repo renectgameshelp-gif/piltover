@@ -10,7 +10,7 @@ from piltover.utils.snowflake import Snowflake
 
 
 class StarsPaymentForm(Model):
-    FORM_TTL_SECONDS = 30 * 60
+    FORM_TTL_SECONDS = 10 * 60
 
     id: int = fields.BigIntField(primary_key=True)
     user: models.User = fields.ForeignKeyField("models.User", related_name="stars_payment_forms")

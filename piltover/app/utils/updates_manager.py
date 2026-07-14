@@ -57,6 +57,21 @@ class UpdatesWithDefaults(Updates):
         )
 
 
+def merge_updates(into: Updates, other: Updates) -> Updates:
+    into.updates.extend(other.updates)
+    user_by_id = {user.id: user for user in into.users}
+    for user in other.users:
+        user_by_id[user.id] = user
+    into.users = list(user_by_id.values())
+    chat_by_id: dict[int, base.Chat] = {}
+    for chat in into.chats:
+        chat_by_id[chat.id if hasattr(chat, "id") else chat.channel_id] = chat
+    for chat in other.chats:
+        chat_by_id[chat.id if hasattr(chat, "id") else chat.channel_id] = chat
+    into.chats = list(chat_by_id.values())
+    return into
+
+
 # TODO: move this module to separate worker
 
 async def send_message(

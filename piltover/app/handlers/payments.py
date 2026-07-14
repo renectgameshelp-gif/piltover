@@ -2,13 +2,14 @@ from piltover.app.utils import stars_manager as stars
 import piltover.app.utils.updates_manager as upd
 from piltover.db.models import UserStarsBalance
 from piltover.enums import ReqHandlerFlags
-from piltover.tl import StarsTopupOption, TLObjectVector, StatsGraphError, StarsAmount, StarsRevenueStatus
+from piltover.tl import StarsTopupOption, TLObjectVector, StatsGraphError, StarsAmount, StarsRevenueStatus, UpdateStarsBalance
 from piltover.tl.functions.payments import (
     GetStarsStatus, GetStarsSubscriptions, GetStarsTransactions, GetStarsTransactions_181,
     GetStarsTransactions_182, GetStarsTransactionsByID, GetStarsTopupOptions,
     GetPaymentForm, SendPaymentForm, SendStarsForm, ValidateRequestedInfo, GetStarsRevenueStats,
+    GetPaymentReceipt,
 )
-from piltover.tl.types.payments import StarsStatus, PaymentResult, ValidatedRequestedInfo, StarsRevenueStats
+from piltover.tl.types.payments import StarsStatus, PaymentResult, ValidatedRequestedInfo, StarsRevenueStats, PaymentReceiptStars
 from piltover.worker import MessageHandler
 
 handler = MessageHandler("payments")
@@ -25,7 +26,15 @@ _TOPUP_OPTIONS = TLObjectVector([
 @handler.on_request(GetStarsStatus, ReqHandlerFlags.BOT_NOT_ALLOWED)
 async def get_stars_status(request: GetStarsStatus, user_id: int) -> StarsStatus:
     wallet_user_id = await stars.ensure_wallet_user_id(user_id, request.peer)
-    return await stars.build_stars_status(wallet_user_id)
+    history, _ = await stars.fetch_transactions(
+        wallet_user_id,
+        inbound=True,
+        outbound=True,
+        ascending=False,
+        offset="",
+        limit=5,
+    )
+    return await stars.build_stars_status(wallet_user_id, history=history)
 
 
 async def _stars_transactions_status(
@@ -138,10 +147,13 @@ async def validate_requested_info() -> ValidatedRequestedInfo:
 
 
 async def _finish_stars_payment(user_id: int, form_id: int, invoice: object) -> PaymentResult:
-    _balance, updated_user_ids = await stars.complete_payment_form(user_id, form_id, invoice)
+    _balance, updated_user_ids, payment_updates = await stars.complete_payment_form(user_id, form_id, invoice)
 
     payer_balance = await UserStarsBalance.get_or_create_for(user_id)
-    payer_updates = await upd.update_stars_balance(user_id, payer_balance.to_stars_amount())
+    result_updates = payment_updates or upd.UpdatesWithDefaults(updates=[])
+    result_updates.updates.append(UpdateStarsBalance(balance=payer_balance.to_stars_amount()))
+
+    await upd.update_stars_balance(user_id, payer_balance.to_stars_amount())
 
     for updated_user_id in updated_user_ids:
         if updated_user_id == user_id:
@@ -149,7 +161,12 @@ async def _finish_stars_payment(user_id: int, form_id: int, invoice: object) -> 
         recipient_balance = await UserStarsBalance.get_or_create_for(updated_user_id)
         await upd.update_stars_balance(updated_user_id, recipient_balance.to_stars_amount())
 
-    return PaymentResult(updates=payer_updates)
+    return PaymentResult(updates=result_updates)
+
+
+@handler.on_request(GetPaymentReceipt, ReqHandlerFlags.BOT_NOT_ALLOWED)
+async def get_payment_receipt(request: GetPaymentReceipt, user_id: int) -> PaymentReceiptStars:
+    return await stars.get_payment_receipt(user_id, request.peer, request.msg_id)
 
 
 @handler.on_request(SendPaymentForm, ReqHandlerFlags.BOT_NOT_ALLOWED)

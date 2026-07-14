@@ -6,16 +6,20 @@ from piltover.app.bot_handlers.gif.inline_handler import gif_inline_query_handle
 from piltover.app.bot_handlers.interaction_handler import BotInteractionHandler
 from piltover.app.bot_handlers.stars import StarsBotInteractionHandler
 from piltover.app.bot_handlers.stars.callback_handler import stars_callback_query_handler
+from piltover.app.bot_handlers.stars_pay import StarsPayBotInteractionHandler
+from piltover.app.bot_handlers.stars_pay.callback_handler import stars_pay_callback_query_handler
 from piltover.app.bot_handlers.stickers import StickersBotInteractionHandler
 from piltover.app.bot_handlers.system import SystemBotInteractionHandler
 from piltover.app.bot_handlers.test_bot import PingTestBotBotInteractionHandler
 from piltover.db.models import Peer, InlineQuery, InlineQueryResult, InlineQueryResultItem, MessageRef, \
     BotPrecheckoutQuery, User
 from piltover.exceptions import ErrorRpc
+from piltover.tl import Updates
 from piltover.tl.types.messages import BotCallbackAnswer, BotResults
 
 PrecheckoutHandlerResult = bool | str | None
 PrecheckoutQueryHandler = Callable[[BotPrecheckoutQuery], Awaitable[PrecheckoutHandlerResult]]
+PaymentSuccessHandler = Callable[[User, Peer, int, str], Awaitable[Updates | None]]
 
 
 async def _awaitable_none(_p: Peer, _m: MessageRef) -> None:
@@ -28,20 +32,32 @@ HANDLERS: dict[str, BotInteractionHandler] = {
     "botfather": BotfatherBotInteractionHandler(),
     "stickers": StickersBotInteractionHandler(),
     "stars": StarsBotInteractionHandler(),
+    "stars_pay": StarsPayBotInteractionHandler(),
 }
 CALLBACK_QUERY_HANDLERS: dict[str, Callable[[Peer, MessageRef, bytes], Awaitable[BotCallbackAnswer | None]]] = {
     "botfather": botfather_callback_query_handler,
     "stars": stars_callback_query_handler,
+    "stars_pay": stars_pay_callback_query_handler,
 }
 INLINE_QUERY_HANDLERS: dict[str, Callable[[InlineQuery], Awaitable[tuple[BotResults, bool] | None]]] = {
     "gif": gif_inline_query_handler,
 }
 PRECHECKOUT_QUERY_HANDLERS: dict[str, PrecheckoutQueryHandler] = {}
+PAYMENT_SUCCESS_HANDLERS: dict[str, PaymentSuccessHandler] = {}
 
 
 async def _get_bot_username(bot_id: int) -> str | None:
     user = await User.get(id=bot_id)
     return await user.get_raw_username()
+
+
+async def try_notify_payment_success(
+        bot_user_id: int, payer: User, payer_peer: Peer, stars: int, title: str,
+) -> Updates | None:
+    bot_username = await _get_bot_username(bot_user_id)
+    if bot_username is None or bot_username not in PAYMENT_SUCCESS_HANDLERS:
+        return None
+    return await PAYMENT_SUCCESS_HANDLERS[bot_username](payer, payer_peer, stars, title)
 
 
 async def try_process_precheckout_query(query: BotPrecheckoutQuery) -> bool:
@@ -96,3 +112,8 @@ async def process_inline_query(
     bot_username = await inline_query.bot.get_raw_username()
 
     return await INLINE_QUERY_HANDLERS[bot_username](inline_query)
+
+
+from piltover.app.bot_handlers.stars_pay.payment_success import stars_pay_payment_success
+
+PAYMENT_SUCCESS_HANDLERS["stars_pay"] = stars_pay_payment_success

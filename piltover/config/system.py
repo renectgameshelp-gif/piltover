@@ -27,6 +27,12 @@ class _GroupCallSfuConfig(BaseModel):
     rtc_port: int = 10000
 
 
+class _BotApiConfig(BaseModel):
+    enabled: bool = True
+    host: str = "127.0.0.1"
+    port: int = 8081
+
+
 class _System(BaseModel):
     data_dir: Path = Path("data")
     database_connection_string: str = "sqlite://data/secrets/piltover.db"
@@ -35,6 +41,7 @@ class _System(BaseModel):
     cache: _CacheConfig
     debug_tracing: _TracingConfig
     group_call_sfu: _GroupCallSfuConfig = _GroupCallSfuConfig()
+    bot_api: _BotApiConfig = _BotApiConfig()
     debug_enable_aiomonitor: bool = False
     enable_system_bot: bool = False
 

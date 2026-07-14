@@ -445,7 +445,7 @@ async def _create_system_user() -> None:
 async def _create_builtin_bots(bots: list[tuple[str, str]]) -> None:
     logger.info("Creating builtin bots...")
 
-    from piltover.db.models import User, Username
+    from piltover.db.models import User, Username, State
 
     for bot_username, bot_name in bots:
         logger.debug(f"Creating bot \"{bot_name}\" (@{bot_username})...")
@@ -461,6 +461,7 @@ async def _create_builtin_bots(bots: list[tuple[str, str]]) -> None:
 
         await Username.filter(Q(user=bot) | Q(username=bot_username)).delete()
         await Username.create(user=bot, username=bot_username)
+        await State.get_or_create(user=bot, defaults={"pts": 0})
 
 
 async def _create_languages(langs_dir: Path) -> None:
@@ -812,6 +813,7 @@ async def create_system_data(
             ("gif", "Tenor GIF Search"),
             ("system", "System info"),
             ("stars", "Stars"),
+            ("stars_pay", "Stars Pay Test"),
         ])
 
     auth_countries_file = cast(Path, args.auth_countries_file)

@@ -41,6 +41,12 @@ backend = "noop"
 # Win10 + Telegram on Windows: run mediasoup-server/start-windows.ps1 (NOT WSL).
 # Worker in WSL: api_url = "windows-host" (auto-resolves Windows host IP).
 # SFU in WSL only: api_url = "http://127.0.0.1:3200" + start-win10-webrtc.ps1 relay.
+# HTTP Bot API (https://core.telegram.org/bots/api)
+[system.bot_api]
+enabled = true
+host = "127.0.0.1"
+port = 8081
+
 [system.group_call_sfu]
 enabled = true
 api_url = "windows-host"

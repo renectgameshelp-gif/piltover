@@ -85,7 +85,10 @@ class MessageContent(Model):
         return None
 
     def to_tl_service_content(self) -> MessageToFormatServiceContent:
-        action = TLObject.read(BytesIO(self.extra_info))
+        if self.extra_info is None:
+            action = MessageActionEmpty()
+        else:
+            action = TLObject.read(BytesIO(self.extra_info))
         if not isinstance(action, MessageActionInst):
             logger.error(
                 f"Expected service message action to "

@@ -11,7 +11,8 @@ from piltover.db.enums import StarsTransactionPeerType
 from piltover.tl import (
     StarsAmount, StarsTransaction as TLStarsTransaction, StarsTransactionPeer,
     StarsTransactionPeerFragment, StarsTransactionPeerAppStore, StarsTransactionPeerPlayMarket,
-    StarsTransactionPeerPremiumBot, StarsTransactionPeerAds, StarsTransactionPeerAPI, PeerUser,
+    StarsTransactionPeerPremiumBot, StarsTransactionPeerAds, StarsTransactionPeerAPI,
+    StarsTransactionPeerUnsupported, PeerUser,
 )
 from piltover.utils.users_chats_channels import UsersChatsChannels
 
@@ -82,21 +83,24 @@ class StarsTransaction(Model):
                     return StarsTransactionPeer(peer=PeerUser(user_id=peer_user_id))
                 return StarsTransactionPeerAPI()
             case StarsTransactionPeerType.PEER:
-                if peer_user_id is not None:
-                    ucc.add_user(peer_user_id)
-                return StarsTransactionPeer(peer=PeerUser(user_id=peer_user_id or 0))
+                if peer_user_id is None:
+                    return StarsTransactionPeerUnsupported()
+                ucc.add_user(peer_user_id)
+                return StarsTransactionPeer(peer=PeerUser(user_id=peer_user_id))
         return StarsTransactionPeerFragment()
 
     def to_tl(
             self, ucc: UsersChatsChannels, ctx: StarsTransactionRenderContext | None = None,
     ) -> TLStarsTransaction:
+        title = self.title or "Telegram Stars"
+        description = self.description or title
         return TLStarsTransaction(
             id=self.transaction_id,
             stars=self.to_stars_amount(),
             date=self.date,
             peer=self._peer_tl(ucc, ctx),
-            title=self.title,
-            description=self.description,
+            title=title,
+            description=description,
             gift=self.gift,
             refund=self.refund,
             msg_id=self.msg_id,

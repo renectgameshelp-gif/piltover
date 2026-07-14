@@ -179,6 +179,19 @@ class PiltoverApp:
                     exc,
                 )
 
+        bot_api = SYSTEM_CONFIG.bot_api
+        if bot_api.enabled:
+            from piltover.app.utils.bot_api.server import start_bot_api_server
+            try:
+                await start_bot_api_server(bot_api.host, bot_api.port)
+            except OSError as exc:
+                logger.error(
+                    "Bot API server failed on {}:{} — HTTP bot API will not work: {}",
+                    bot_api.host,
+                    bot_api.port,
+                    exc,
+                )
+
         await self._gateway.serve()
         if scheduler_task is not None:
             await scheduler_task

@@ -12,7 +12,7 @@ from tortoise.transactions import in_transaction
 
 import piltover.app.utils.updates_manager as upd
 from piltover.app.bot_handlers import bots
-from piltover.app.utils.stars_manager import STARS_CURRENCY, _pack_invoice_static
+from piltover.app.utils.stars_manager import STARS_CURRENCY, _pack_invoice_static, ensure_invoice_reply_markup
 from piltover.app.utils.utils import process_message_entities, process_reply_markup, B64URL_STR_RE
 from piltover.config import APP_CONFIG, DICE_CONFIG
 from piltover.context import request_ctx
@@ -163,6 +163,17 @@ async def send_created_messages_internal(
 
     if (update := await upd.send_message(user.id, messages)) is None:
         raise Unreachable
+
+    from piltover.app.utils.bot_api import bot_api_updates
+    author_id = next(iter(messages.values())).content.author_id
+    for msg_peer, message_ref in messages.items():
+        if msg_peer.type is not PeerType.USER or msg_peer.owner_id == author_id:
+            continue
+        if message_ref.content.message is None:
+            continue
+        owner = await User.get_or_none(id=msg_peer.owner_id)
+        if owner is not None and owner.bot:
+            await bot_api_updates.enqueue_incoming_message(owner, msg_peer, message_ref)
 
     if peer.user and peer.user.bot and await peer.user.get_raw_username() in bots.HANDLERS and ctx is not None:
         message_ref = messages[peer]
@@ -1106,6 +1117,11 @@ async def send_media(request: SendMedia | SendMedia_148 | SendMedia_176, user_id
     else:
         is_anonymous = False
     reply_markup = await process_reply_markup(request.reply_markup, user)
+    if isinstance(request.media, InputMediaInvoice):
+        total_amount = sum(price.amount for price in request.media.invoice.prices)
+        reply_markup = ensure_invoice_reply_markup(
+            request.media.invoice.currency, total_amount, reply_markup,
+        )
     send_as_channel_id = await process_send_as(request.send_as, user_id)
 
     if request.update_stickersets_order and media.file and media.file.type is FileType.DOCUMENT_STICKER:
