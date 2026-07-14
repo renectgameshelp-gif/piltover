@@ -24,12 +24,12 @@ An experimental Telegram server written from scratch in Python. Fork of [RuslanU
 - [ ] [Min constructors](https://core.telegram.org/api/min)
 - [x] Channel discussions
 - [ ] [WebK](https://github.com/morethanwords/tweb) hangs on some requests, logs errors about wrong auth key id and/or session id???
-- [ ] Proper sessions handling:
-  - [ ] msg_id and seq_no generation **MUST** be in the session, **NOT** in the connection
-  - [ ] when client is disconnected, session should be stored (and receive messages) for up to 10 minutes
-  - [ ] when client is disconnected and then reconnected, all missed (not-acked) messages should be sent
-  - [ ] client .send method should enqueue message for sending, not send it right away
-  - [ ] maybe poll for new client messages? session stores id of the last polled message, when client calls session.poll_messages, it gets all messages with id greater than one that is stored, saves new last id, and returns message list to the client? 
+- [x] Proper sessions handling:
+  - [x] msg_id and seq_no generation **MUST** be in the session, **NOT** in the connection
+  - [x] when client is disconnected, session should be stored (and receive messages) for up to 10 minutes
+  - [x] when client is disconnected and then reconnected, all missed (not-acked) messages should be sent
+  - [x] client .send method should enqueue message for sending, not send it right away
+  - [ ] maybe poll for new client messages? session stores id of the last polled message, when client calls session.poll_messages, it gets all messages with id greater than one that is stored, saves new last id, and returns message list to the client?
 - [ ] Top peers
 - [ ] Proper contacts implementation (right now user is able to add/remove/import contact, but only contacts for existing users are created).
 - [ ] Support S3 as a storage backend
