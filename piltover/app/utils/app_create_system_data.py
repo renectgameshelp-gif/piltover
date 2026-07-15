@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import mimetypes
 from pathlib import Path
 from time import time
 from typing import TYPE_CHECKING, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from piltover.utils.fastrand_shim import xorshift128plus_bytes
 from loguru import logger
 from tortoise.expressions import Q
+from tortoise.transactions import in_transaction
 
 from piltover.app.utils.utils import telegram_hash
 from piltover.config import APP_CONFIG, SYSTEM_CONFIG
@@ -427,7 +429,62 @@ async def _create_peer_colors(colors_dir: Path) -> None:
         )
 
 
-async def _create_system_user() -> None:
+_AVATAR_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def _find_system_avatar(avatars_dir: Path, username: str) -> Path | None:
+    for ext in _AVATAR_EXTENSIONS:
+        path = avatars_dir / f"{username}{ext}"
+        if path.is_file():
+            return path
+    return None
+
+
+async def _apply_system_avatar(avatars_dir: Path, user_id: int, username: str) -> None:
+    image_path = _find_system_avatar(avatars_dir, username)
+    if image_path is None:
+        return
+
+    mime, _ = mimetypes.guess_type(image_path.name)
+    if mime is None or not mime.startswith("image/"):
+        logger.warning("Skipping avatar for @{username}: unsupported file type {path}", username=username, path=image_path)
+        return
+
+    from tortoise.expressions import F
+
+    from piltover.db.enums import FileType
+    from piltover.db.models import File, User, UserPhoto
+    from piltover.storage.base import StorageType
+    from piltover.storage.local_file import LocalFileStorage
+
+    data_dir = SYSTEM_CONFIG.data_dir
+    storage = LocalFileStorage(data_dir)
+    physical_id = uuid4()
+    image_bytes = image_path.read_bytes()
+
+    await storage.save_part(physical_id, 0, image_bytes, True)
+    await storage.finalize_upload_as(physical_id, StorageType.PHOTO, 0)
+
+    file = File(
+        physical_id=physical_id,
+        mime_type=mime,
+        size=len(image_bytes),
+        type=FileType.PHOTO,
+    )
+    if not await file.make_thumbs(storage, profile_photo=True):
+        logger.warning("Skipping avatar for @{username}: failed to process {path}", username=username, path=image_path)
+        return
+
+    async with in_transaction():
+        await file.save()
+        await UserPhoto.filter(user_id=user_id).delete()
+        await UserPhoto.create(user_id=user_id, file=file, current=True)
+        await User.filter(id=user_id).update(version=F("version") + 1)
+
+    logger.info("Set profile photo for @{username} from {path}", username=username, path=image_path)
+
+
+async def _create_system_user(avatars_dir: Path) -> None:
     logger.info("Creating system user...")
 
     from piltover.db.models import State, User, Username
@@ -442,9 +499,10 @@ async def _create_system_user() -> None:
 
     await Username.filter(Q(user=sys_user) | Q(username=APP_CONFIG.system_user_username)).delete()
     await Username.create(user=sys_user, username=APP_CONFIG.system_user_username)
+    await _apply_system_avatar(avatars_dir, sys_user.id, APP_CONFIG.system_user_username)
 
 
-async def _create_builtin_bots(bots: list[tuple[str, str]]) -> None:
+async def _create_builtin_bots(bots: list[tuple[str, str]], avatars_dir: Path) -> None:
     logger.info("Creating builtin bots...")
 
     from piltover.db.models import User, Username, State, Bot
@@ -468,6 +526,7 @@ async def _create_builtin_bots(bots: list[tuple[str, str]]) -> None:
         await Username.create(user=bot, username=bot_username)
         await State.get_or_create(user=bot, defaults={"pts": 0})
         await Bot.filter(bot=bot).delete()
+        await _apply_system_avatar(avatars_dir, bot.id, bot_username)
 
 
 async def _create_languages(langs_dir: Path) -> None:
@@ -810,8 +869,11 @@ async def create_system_data(
         system_users: bool = True, countries_list: bool = True, reactions: bool = True, chat_themes: bool = True,
         peer_colors: bool = True, languages: bool = True, system_stickersets: bool = True, emoji_groups: bool = True,
 ) -> None:
+    avatars_dir = SYSTEM_CONFIG.data_dir / "system_avatars"
+    avatars_dir.mkdir(parents=True, exist_ok=True)
+
     if system_users:
-        await _create_system_user()
+        await _create_system_user(avatars_dir)
         await _create_builtin_bots([
             ("test_bot", "Test Bot"),
             ("botfather", "BotFather"),
@@ -825,7 +887,7 @@ async def create_system_data(
             ("verifybot", "Verify Bot"),
             ("admin", "Admin"),
             ("spambot", "Spam Info Bot"),
-        ])
+        ], avatars_dir)
 
     auth_countries_file = cast(Path, args.auth_countries_file)
 

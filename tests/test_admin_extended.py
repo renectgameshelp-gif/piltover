@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from piltover.app.bot_handlers.adminbot.callback_handler import adminbot_callback_query_handler
@@ -85,6 +87,28 @@ async def test_admin_kick_sessions() -> None:
         assert "kicked" in (answer.message or "").lower()
 
     assert await UserAuthorization.filter(user_id=target_id).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_system_bot_avatar_from_file(tmp_path: Path) -> None:
+    from PIL import Image
+
+    from piltover.app.utils.app_create_system_data import _apply_system_avatar
+    from piltover.db.models import User, UserPhoto
+
+    bot = await User.filter(username__username="admin", system=True).first()
+    assert bot is not None
+
+    avatars_dir = tmp_path / "system_avatars"
+    avatars_dir.mkdir()
+    Image.new("RGB", (128, 128), color=(10, 20, 30)).save(avatars_dir / "admin.png")
+
+    await _apply_system_avatar(avatars_dir, bot.id, "admin")
+
+    photo = await UserPhoto.get_or_none(user_id=bot.id, current=True).select_related("file")
+    assert photo is not None
+    assert photo.file.mime_type == "image/png"
+    assert photo.file.photo_sizes
 
 
 @pytest.mark.asyncio
