@@ -6,12 +6,11 @@ from piltover.app.bot_handlers.adminbot.callback_data import (
     encode_bot_list_key,
     encode_list_key,
     parse_bot_list_key,
-    user_link,
     user_open_link,
 )
 from piltover.app.bot_handlers.adminbot.pages import _usernames_for_users, _user_nav_row
 from piltover.app.bot_handlers.adminbot.utils import (
-    HOME, PAGE_SIZE, back_home_row, hide_row, list_keyboard, push_bot_message,
+    HOME, PAGE_SIZE, back_home_row, hide_row, list_keyboard, push_bot_message, tme_username_entities,
 )
 from piltover.app.utils.admin_reports import (
     build_report_detail_lines, format_peer_type, format_report_reason, get_report_context,
@@ -21,7 +20,7 @@ from piltover.db.enums import AdminReportPeerType
 from piltover.db.models import (
     AdminReport, Bot, BotCommand, BotInfo, Channel, Chat, ChatParticipant, MessageRef, Peer, User, Username,
 )
-from piltover.tl import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+from piltover.tl import KeyboardButtonCallback, KeyboardButtonRow, KeyboardButtonUrl, ReplyInlineMarkup
 
 
 async def page_search_prompt(peer: Peer, menu: MessageRef, *, filters) -> MessageRef:
@@ -288,15 +287,21 @@ async def page_bot(
     elif bot_user.system:
         lines.append("Owner: — (system bot)")
 
-    rows: list[KeyboardButtonRow] = [
-        KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="🔑 API token", data=f"adm:bot:token:{bot_id}:{list_key}".encode()),
-            KeyboardButtonCallback(text="⚙️ Settings", data=f"adm:bot:set:{bot_id}:{list_key}".encode()),
-        ]),
-    ]
+    text = "\n".join(lines)
+    entities = tme_username_entities(text, username) if username else None
+
+    rows: list[KeyboardButtonRow] = []
+    if username:
+        rows.append(KeyboardButtonRow(buttons=[
+            KeyboardButtonUrl(text=f"Open @{username}", url=f"https://t.me/{username}"),
+        ]))
+    rows.append(KeyboardButtonRow(buttons=[
+        KeyboardButtonCallback(text="🔑 API token", data=f"adm:bot:token:{bot_id}:{list_key}".encode()),
+        KeyboardButtonCallback(text="⚙️ Settings", data=f"adm:bot:set:{bot_id}:{list_key}".encode()),
+    ]))
     owner_row: list[KeyboardButtonCallback] = []
     if owner:
-        owner_row.append(KeyboardButtonCallback(text="👤 Owner", data=user_link(owner.id, list_key)))
+        owner_row.append(KeyboardButtonCallback(text="👤 Owner", data=user_open_link(owner.id, list_key)))
     if bot_user.verified:
         owner_row.append(KeyboardButtonCallback(
             text="Remove ✓", data=f"adm:act:unverify:bot:{bot_id}:{list_key}".encode(),
@@ -326,8 +331,8 @@ async def page_bot(
         rows.append(_bot_back_row(list_key))
     markup = ReplyInlineMarkup(rows=rows)
     if overlay or new_message:
-        return await push_bot_message(peer, "\n".join(lines), markup)
-    return await edit_bot_message(menu, peer, "\n".join(lines), markup)
+        return await push_bot_message(peer, text, markup, entities=entities)
+    return await edit_bot_message(menu, peer, text, markup, entities=entities)
 
 
 async def page_bot_token(peer: Peer, bot_id: int, menu: MessageRef, *, list_key: str = "b0") -> MessageRef:

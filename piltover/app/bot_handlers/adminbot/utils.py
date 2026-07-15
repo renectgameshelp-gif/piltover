@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import piltover.app.utils.updates_manager as upd
+from piltover.app.utils.formatable_text_with_entities import build_u8_to_u16
 from piltover.db.models import MessageRef, Peer, User
-from piltover.tl import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+from piltover.tl import KeyboardButtonCallback, KeyboardButtonRow, MessageEntityTextUrl, ReplyInlineMarkup
 
 PAGE_SIZE = 8
 HOME = b"adm:home"
@@ -28,6 +29,21 @@ def user_badges(user: User) -> str:
     if getattr(user, "spam_blocked", False):
         parts.append("🚫")
     return "".join(parts)
+
+
+def tme_username_entities(text: str, username: str) -> list[dict[str, str | int]]:
+    link_text = f"@{username}"
+    idx = text.find(link_text)
+    if idx < 0:
+        return []
+    u8_to_u16 = build_u8_to_u16(text)
+    end = idx + len(link_text)
+    return [{
+        "_": MessageEntityTextUrl.tlid(),
+        "offset": u8_to_u16[idx],
+        "length": u8_to_u16[end] - u8_to_u16[idx],
+        "url": f"https://t.me/{username}",
+    }]
 
 
 def user_label(user: User, *, username: str | None = None) -> str:
@@ -87,16 +103,23 @@ def list_keyboard(
     return ReplyInlineMarkup(rows=rows)
 
 
-async def send_bot_message(peer: Peer, text: str, keyboard: ReplyInlineMarkup | None = None) -> MessageRef:
+async def send_bot_message(
+        peer: Peer, text: str, keyboard: ReplyInlineMarkup | None = None,
+        *, entities: list[dict[str, str | int]] | None = None,
+) -> MessageRef:
     messages = await MessageRef.create_for_peer(
         peer, peer.user_id, opposite=False,
         message=text, reply_markup=keyboard.write() if keyboard else None,
+        entities=entities,
     )
     return messages[peer]
 
 
-async def push_bot_message(peer: Peer, text: str, keyboard: ReplyInlineMarkup | None = None) -> MessageRef:
-    message = await send_bot_message(peer, text, keyboard)
+async def push_bot_message(
+        peer: Peer, text: str, keyboard: ReplyInlineMarkup | None = None,
+        *, entities: list[dict[str, str | int]] | None = None,
+) -> MessageRef:
+    message = await send_bot_message(peer, text, keyboard, entities=entities)
     await upd.send_message(peer.owner_id, {peer: message}, False)
     return message
 
