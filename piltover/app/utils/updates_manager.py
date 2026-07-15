@@ -921,6 +921,38 @@ async def update_user(user: User) -> None:
     await Update.bulk_create(updates_to_create)
 
 
+async def notify_user_deleted(user_id: int) -> None:
+    deleted_tl = User.to_tl_deleted(user_id)
+    owner_ids = {
+        owner_id
+        for owner_id in await Peer.filter(type=PeerType.USER, user_id=user_id).values_list("owner_id", flat=True)
+        if owner_id != user_id
+    }
+    if not owner_ids:
+        return
+
+    updates_to_create = []
+    for owner_id in owner_ids:
+        if not await State.filter(user_id=owner_id).exists():
+            continue
+        pts = await State.add_pts(owner_id, 1)
+        updates_to_create.append(
+            Update(
+                user_id=owner_id,
+                update_type=UpdateType.USER_UPDATE,
+                pts=pts,
+                related_id=user_id,
+            ),
+        )
+        await SessionManager.send(UpdatesWithDefaults(
+            updates=[UpdateUser(user_id=user_id)],
+            users=[deleted_tl],
+        ), owner_id)
+
+    if updates_to_create:
+        await Update.bulk_create(updates_to_create)
+
+
 async def update_chat_participants(chat: Chat, peers: list[Peer]) -> Updates:
     user_ids = [peer.owner_id for peer in peers]
     ptss = await State.add_pts_bulk(user_ids, 1)

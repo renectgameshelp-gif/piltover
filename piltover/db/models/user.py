@@ -87,6 +87,10 @@ class User(Model):
     def _cache_key(self) -> str:
         return f"user:{self.id}:{self.version}:{self._CACHE_VERSION}"
 
+    @classmethod
+    def to_tl_deleted(cls, user_id: int) -> TLUser:
+        return TLUser(id=user_id, is_self=False, access_hash=-1, deleted=True)
+
     async def get_username(self) -> models.Username | None:
         if self.cached_username is _MISSING:
             self.cached_username = await models.Username.get_or_none(user=self)
@@ -125,12 +129,7 @@ class User(Model):
 
     async def to_tl(self, *, userphoto: models.UserPhoto | None | _Missing = _MISSING) -> TLUserBase:
         if self.deleted:
-            return TLUser(
-                id=self.id,
-                is_self=False,
-                access_hash=0,
-                deleted=True,
-            )
+            return self.to_tl_deleted(self.id)
 
         cache_key = self._cache_key()
 
@@ -337,6 +336,10 @@ class User(Model):
         to_cache = []
 
         for user in users:
+            if user.deleted:
+                tl.append(cls.to_tl_deleted(user.id))
+                continue
+
             if user.id in cached_users:
                 tl.append(cached_users[user.id])
                 continue

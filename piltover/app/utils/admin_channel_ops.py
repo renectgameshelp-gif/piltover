@@ -112,6 +112,7 @@ async def admin_delete_bot(bot_user: User) -> None:
 
     if await State.filter(user_id=bot_user.id).exists():
         await upd.update_user(bot_user)
+    await upd.notify_user_deleted(bot_user.id)
 
     await kick_all_user_sessions(bot_user.id)
     await Bot.filter(bot_id=bot_user.id).delete()

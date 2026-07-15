@@ -64,6 +64,9 @@ async def admin_delete_user(user: User) -> int:
             defaults={"user_id": user.id},
         )
 
+    import piltover.app.utils.updates_manager as upd
+    await upd.notify_user_deleted(user.id)
+
     return sessions_kicked
 
 

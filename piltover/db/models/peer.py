@@ -283,11 +283,22 @@ class Peer(Model, Generic[OwnerT, UserT, ChatT, ChannelT, OwnerIdT, UserIdT, Cha
             allow_migrated_chat: bool = False, peer_types: tuple[PeerType, ...] | None = None,
             select_related: tuple[str, ...] | None = None, select_user_username: bool = False,
     ) -> Peer | None:
+        user_id = user.id if isinstance(user, models.User) else user
+
         query = cls.query_from_input_peer(user, input_peer, allow_bot, allow_migrated_chat, peer_types)
         if query is None:
+            if isinstance(input_peer, (InputPeerUser, InputUser)):
+                peer_query = Q(owner_id=user_id, user_id=input_peer.user_id)
+                if not allow_bot:
+                    peer_query &= Q(user__bot=False)
+                peer = await Peer.get_or_none(peer_query).select_related("owner", "user")
+                if peer is not None and peer.user.deleted:
+                    if select_related is None:
+                        select_related = ()
+                    if select_user_username:
+                        select_related = (*select_related, "user__username")
+                    return await Peer.filter(id=peer.id).select_related("owner", "user", *select_related).first()
             return None
-
-        user_id = user.id if isinstance(user, models.User) else user
 
         if select_related is None:
             select_related = ()
@@ -338,6 +349,9 @@ class Peer(Model, Generic[OwnerT, UserT, ChatT, ChannelT, OwnerIdT, UserIdT, Cha
         )
         if peer_ is not None:
             return peer_
+        if isinstance(peer, (InputPeerUser, InputUser)) \
+                and await models.User.filter(id=peer.user_id, deleted=True).exists():
+            raise ErrorRpc(error_code=400, error_message="INPUT_USER_DEACTIVATED")
         raise ErrorRpc(error_code=code, error_message=message)
 
     async def get_opposite(self, allow_blocked: bool = False) -> list[Peer]:

@@ -443,6 +443,11 @@ def _check_we_blocked_user(peer: Peer) -> None:
         raise ErrorRpc(error_code=400, error_message="YOU_BLOCKED_USER")
 
 
+def _check_deactivated_user(peer: Peer) -> None:
+    if peer.type is PeerType.USER and peer.user.deleted:
+        raise ErrorRpc(error_code=400, error_message="INPUT_USER_DEACTIVATED")
+
+
 def _check_disallow_send_to_bot(user: User, peer: Peer) -> None:
     if user.bot and (peer.type is PeerType.SELF or (peer.type is PeerType.USER and peer.user.bot)):
         raise ErrorRpc(error_code=400, error_message="USER_IS_BOT")
@@ -527,6 +532,7 @@ async def send_message(request: SendMessage, user_id: int):
 
     _check_disallow_send_to_bot(user, peer)
     await _check_spam_blocked(user, peer, reply_to_message_id=reply_to_message_id)
+    _check_deactivated_user(peer)
     _check_we_blocked_user(peer)
     await _check_bot_blocked(user, peer)
 
@@ -676,6 +682,7 @@ async def edit_message(request: EditMessage | EditMessage_133, user: User):
             raise ErrorRpc(error_code=403, error_message="CHAT_WRITE_FORBIDDEN")
 
     await _check_bot_blocked(user, peer)
+    _check_deactivated_user(peer)
     _check_we_blocked_user(peer)
 
     if peer.type is PeerType.CHANNEL:
@@ -1123,6 +1130,7 @@ async def send_media(request: SendMedia | SendMedia_148 | SendMedia_176, user_id
 
     _check_disallow_send_to_bot(user, peer)
     await _check_spam_blocked(user, peer, reply_to_message_id=reply_to_message_id)
+    _check_deactivated_user(peer)
     _check_we_blocked_user(peer)
     await _check_bot_blocked(user, peer)
 
@@ -1245,6 +1253,7 @@ async def forward_messages(
 
     _check_disallow_send_to_bot(user, to_peer)
     await _check_spam_blocked(user, to_peer)
+    _check_deactivated_user(to_peer)
     _check_we_blocked_user(to_peer)
     await _check_bot_blocked(user, to_peer)
 
@@ -1410,6 +1419,7 @@ async def upload_media(request: UploadMedia | UploadMedia_133, user_id: int):
         if not chat_or_channel.can_send_media(participant):
             raise ErrorRpc(error_code=403, error_message="CHAT_WRITE_FORBIDDEN")
 
+    _check_deactivated_user(peer)
     _check_we_blocked_user(peer)
 
     user = await User.get(id=user_id).only("id")
@@ -1443,6 +1453,7 @@ async def send_multi_media(request: SendMultiMedia | SendMultiMedia_148 | SendMu
 
     _check_disallow_send_to_bot(user, peer)
     await _check_spam_blocked(user, peer, reply_to_message_id=reply_to_message_id)
+    _check_deactivated_user(peer)
     _check_we_blocked_user(peer)
     await _check_bot_blocked(user, peer)
 
@@ -1628,6 +1639,7 @@ async def send_inline_bot_result(request: SendInlineBotResult, user_id: int) -> 
 
     _check_disallow_send_to_bot(user, peer)
     await _check_spam_blocked(user, peer, reply_to_message_id=reply_to_message_id)
+    _check_deactivated_user(peer)
     _check_we_blocked_user(peer)
     await _check_bot_blocked(user, peer)
 
@@ -1775,6 +1787,7 @@ async def start_bot(request: StartBot, user_id: int):
         if chat_peer.type is PeerType.CHANNEL:
             await _check_channel_slowmode(chat_peer.channel, participant, user_id)
 
+    _check_deactivated_user(chat_peer)
     _check_we_blocked_user(chat_peer)
 
     message_text = "/start"

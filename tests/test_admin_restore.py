@@ -78,6 +78,30 @@ async def test_admin_restore_action_from_deleted_list() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deleted_user_serializes_as_deleted_account() -> None:
+    user = await User.create(phone_number="900000040", first_name="Gone", bot=False)
+    await admin_delete_user(user)
+
+    deleted = await User.get(id=user.id).only("id", "version", "bot", "deleted")
+    tl_users = await User.to_tl_bulk([deleted])
+    assert len(tl_users) == 1
+    assert tl_users[0].deleted is True
+    assert not getattr(tl_users[0], "first_name", None)
+
+
+@pytest.mark.asyncio
+async def test_cannot_message_deleted_user() -> None:
+    async with TestClient(phone_number="123456789") as client1, TestClient(phone_number="900000041") as client2:
+        await client1.resolve_user(client2, False)
+
+        target = await User.get(phone_number=client2.phone_number)
+        await admin_delete_user(target)
+
+        with pytest.raises(InputUserDeactivated):
+            await client1.send_message(client2.me.id, "hello deleted")
+
+
+@pytest.mark.asyncio
 async def test_cannot_call_deleted_user() -> None:
     from piltover.db.models import UserAuthorization
 
