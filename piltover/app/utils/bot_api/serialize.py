@@ -4,7 +4,9 @@ from io import BytesIO
 
 from piltover.app.utils.bot_api.entities import entities_to_bot_api
 from piltover.app.utils.bot_api.media import file_to_bot_api, serialize_media_field
-from piltover.db.models import CallbackQuery, BotPrecheckoutQuery, MessageFwdHeader, MessageRef, Peer, User
+from piltover.app.utils.bot_api.peers import peer_to_bot_api_chat_id
+from piltover.db.enums import PeerType
+from piltover.db.models import BotInfo, CallbackQuery, BotPrecheckoutQuery, MessageFwdHeader, MessageRef, Peer, User
 from piltover.tl import (
     KeyboardButtonBuy, KeyboardButtonCallback, KeyboardButtonCopy, KeyboardButtonGame,
     KeyboardButtonSwitchInline, KeyboardButtonUrl, KeyboardButtonWebView, ReplyInlineMarkup,
@@ -34,9 +36,17 @@ async def user_to_bot_api(user: User, *, for_get_me: bool = False) -> dict:
         result["language_code"] = lang_code
 
     if for_get_me and user.bot:
-        result["can_join_groups"] = True
-        result["can_read_all_group_messages"] = False
-        if username:
+        from piltover.app.utils.bot_api.updates import bot_api_updates
+
+        info = await BotInfo.get_or_none(user_id=user.id)
+        result["can_join_groups"] = info.can_join_groups if info is not None else True
+        read_all = bot_api_updates.can_read_all_group_messages(user.id)
+        if info is not None and not info.group_privacy:
+            read_all = True
+        result["can_read_all_group_messages"] = read_all
+        if info is not None and info.inline_mode:
+            result["supports_inline_queries"] = True
+        elif username:
             from piltover.app.bot_handlers import bots as builtin_bots
             if username in builtin_bots.INLINE_QUERY_HANDLERS:
                 result["supports_inline_queries"] = True
@@ -58,6 +68,32 @@ async def private_chat_to_bot_api(peer: Peer) -> dict:
     if username:
         chat["username"] = username
     return chat
+
+
+async def peer_to_bot_api(peer: Peer) -> dict:
+    if peer.type is PeerType.USER:
+        return await private_chat_to_bot_api(peer)
+
+    chat: dict = {
+        "id": peer_to_bot_api_chat_id(peer),
+    }
+
+    if peer.type is PeerType.CHAT:
+        await peer.fetch_related("chat")
+        chat["type"] = "group"
+        chat["title"] = peer.chat.name
+        return chat
+
+    if peer.type is PeerType.CHANNEL:
+        await peer.fetch_related("channel", "channel__username")
+        channel = peer.channel
+        chat["type"] = "channel" if channel.channel else "supergroup"
+        chat["title"] = channel.name
+        if channel.username is not None:
+            chat["username"] = channel.username.username
+        return chat
+
+    raise ValueError(f"unsupported peer type: {peer.type}")
 
 
 def _button_to_bot_api(button) -> dict | None:
@@ -122,7 +158,7 @@ async def message_to_bot_api(
     result: dict = {
         "message_id": message.id,
         "date": int(content.date.timestamp()),
-        "chat": await private_chat_to_bot_api(peer),
+        "chat": await peer_to_bot_api(peer),
     }
 
     if author is not None:

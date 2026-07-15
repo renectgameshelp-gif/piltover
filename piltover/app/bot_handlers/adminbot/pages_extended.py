@@ -25,43 +25,43 @@ from piltover.tl import KeyboardButtonCallback, KeyboardButtonRow, KeyboardButto
 
 async def page_search_prompt(peer: Peer, menu: MessageRef, *, filters) -> MessageRef:
     labels = {
-        "user": "user (ID, @username, phone, or name)",
-        "ch": "channel/supergroup (ID or @username)",
-        "gr": "basic group (ID)",
-        "bot": "bot (ID or @username)",
+        "user": "пользователя (ID, @username, телефон или имя)",
+        "ch": "канал/супергруппу (ID или @username)",
+        "gr": "обычную группу (ID)",
+        "bot": "бота (ID или @username)",
     }
-    lines = [f"🔍 Send {labels.get(filters.kind, 'query')} in chat.", ""]
+    lines = [f"🔍 Отправьте {labels.get(filters.kind, 'запрос')} в чат.", ""]
     rows: list[KeyboardButtonRow] = []
 
     if filters.kind == "user":
-        lines.append("Filters:")
-        lines.append(f"  System users: {'yes' if filters.show_system else 'no'}")
-        lines.append(f"  Deleted users: {'yes' if filters.include_deleted else 'no'}")
+        lines.append("Фильтры:")
+        lines.append(f"  Системные пользователи: {'да' if filters.show_system else 'нет'}")
+        lines.append(f"  Удалённые пользователи: {'да' if filters.include_deleted else 'нет'}")
         rows.append(KeyboardButtonRow(buttons=[
             KeyboardButtonCallback(
-                text="✅ System" if filters.show_system else "☑️ System",
+                text="✅ Системные" if filters.show_system else "☑️ Системные",
                 data=b"adm:findf:sys",
             ),
             KeyboardButtonCallback(
-                text="✅ Deleted" if filters.include_deleted else "☑️ Deleted",
+                text="✅ Удалённые" if filters.include_deleted else "☑️ Удалённые",
                 data=b"adm:findf:del",
             ),
         ]))
     elif filters.kind == "bot":
-        lines.append("Filters:")
-        lines.append(f"  System bots: {'yes' if filters.show_system else 'no'}")
+        lines.append("Фильтры:")
+        lines.append(f"  Системные боты: {'да' if filters.show_system else 'нет'}")
         rows.append(KeyboardButtonRow(buttons=[
             KeyboardButtonCallback(
-                text="✅ System" if filters.show_system else "☑️ System",
+                text="✅ Системные" if filters.show_system else "☑️ Системные",
                 data=b"adm:findf:sys",
             ),
         ]))
     elif filters.kind == "ch":
-        kind_labels = {"all": "all", "channel": "channels only", "supergroup": "supergroups only"}
-        lines.append("Filters:")
-        lines.append(f"  Type: {kind_labels.get(filters.channel_kind, filters.channel_kind)}")
+        kind_labels = {"all": "все", "channel": "только каналы", "supergroup": "только супергруппы"}
+        lines.append("Фильтры:")
+        lines.append(f"  Тип: {kind_labels.get(filters.channel_kind, filters.channel_kind)}")
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Cycle type", data=b"adm:findf:channel"),
+            KeyboardButtonCallback(text="Сменить тип", data=b"adm:findf:channel"),
         ]))
 
     rows.append(back_home_row())
@@ -74,21 +74,21 @@ async def page_bot_edit_prompt(
     from piltover.app.utils.admin_bot_edit import CLEARABLE_BOT_FIELDS
 
     prompts = {
-        "name": "Send new bot name (max 64 characters).",
-        "lastname": "Send last name (max 64) or tap Empty to clear.",
-        "username": "Send @username (5–32 chars: a-z, 0-9, _).",
-        "about": "Send about text (max 120) or tap Empty to clear.",
-        "desc": "Send bot description (max 120) or tap Empty to clear.",
-        "privacy": "Send privacy policy https URL (max 240) or tap Empty to clear.",
+        "name": "Отправьте новое имя бота (макс. 64 символа).",
+        "lastname": "Отправьте фамилию (макс. 64) или нажмите «Пусто», чтобы очистить.",
+        "username": "Отправьте @username (5–32 символа: a-z, 0-9, _).",
+        "about": "Отправьте текст «О боте» (макс. 120) или нажмите «Пусто», чтобы очистить.",
+        "desc": "Отправьте описание бота (макс. 120) или нажмите «Пусто», чтобы очистить.",
+        "privacy": "Отправьте URL политики конфиденциальности (https, макс. 240) или нажмите «Пусто», чтобы очистить.",
     }
-    title = prompts.get(field, "Send new value.")
+    title = prompts.get(field, "Отправьте новое значение.")
     rows: list[KeyboardButtonRow] = []
     if field in CLEARABLE_BOT_FIELDS:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Empty", data=f"adm:bot:empty:{field}:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="Пусто", data=f"adm:bot:empty:{field}:{bot_id}:{list_key}".encode()),
         ]))
     rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="« Cancel", data=f"adm:bot:set:{bot_id}:{list_key}".encode()),
+        KeyboardButtonCallback(text="« Отмена", data=f"adm:bot:set:{bot_id}:{list_key}".encode()),
     ]))
     return await edit_bot_message(menu, peer, f"✏️ {title}", ReplyInlineMarkup(rows=rows))
 
@@ -97,7 +97,7 @@ async def page_deleted_users(peer: Peer, page: int, menu: MessageRef) -> Message
     accounts = list(await User.filter(deleted=True, system=False).order_by("-id"))
     total = len(accounts)
     if total == 0:
-        return await edit_bot_message(menu, peer, "No deleted accounts.", list_keyboard(
+        return await edit_bot_message(menu, peer, "Нет удалённых аккаунтов.", list_keyboard(
             items=[], page=0, total_pages=1, page_prefix=b"adm:del",
         ))
 
@@ -112,7 +112,7 @@ async def page_deleted_users(peer: Peer, page: int, menu: MessageRef) -> Message
         for u in chunk
     ]
     return await edit_bot_message(
-        menu, peer, f"Deleted accounts ({total}):", list_keyboard(
+        menu, peer, f"Удалённые аккаунты ({total}):", list_keyboard(
             items=items, page=page, total_pages=total_pages, page_prefix=b"adm:del",
         ),
     )
@@ -121,41 +121,41 @@ async def page_deleted_users(peer: Peer, page: int, menu: MessageRef) -> Message
 async def page_deleted_user(peer: Peer, user_id: int, menu: MessageRef, *, list_key: str = "d0") -> MessageRef:
     user = await User.get_or_none(id=user_id, deleted=True, system=False)
     if user is None:
-        return await edit_bot_message(menu, peer, "Account not found.", ReplyInlineMarkup(rows=[back_home_row()]))
+        return await edit_bot_message(menu, peer, "Аккаунт не найден.", ReplyInlineMarkup(rows=[back_home_row()]))
 
     from piltover.db.models import BlockedPhone, DeletedAccountSnapshot
     blocked = await BlockedPhone.get_or_none(user_id=user.id)
     snapshot = await DeletedAccountSnapshot.get_or_none(user_id=user.id)
 
-    kind = "bot" if user.bot else "user"
+    kind = "бот" if user.bot else "пользователь"
     lines = [
-        f"{'🤖' if user.bot else '🗑'} Deleted {kind}",
+        f"{'🤖' if user.bot else '🗑'} Удалённый {kind}",
         f"ID: {user.id}",
-        f"Name: {user.first_name}",
-        f"Snapshot: {'yes' if snapshot else 'no'}",
+        f"Имя: {user.first_name}",
+        f"Снимок: {'да' if snapshot else 'нет'}",
     ]
     if snapshot:
         if snapshot.username:
-            lines.append(f"Saved username: @{snapshot.username}")
+            lines.append(f"Сохранённый username: @{snapshot.username}")
         if snapshot.phone_number:
-            lines.append(f"Saved phone: {snapshot.phone_number}")
+            lines.append(f"Сохранённый телефон: {snapshot.phone_number}")
         if user.bot and snapshot.bot_owner_id:
-            lines.append(f"Saved owner id: {snapshot.bot_owner_id}")
+            lines.append(f"Сохранённый id владельца: {snapshot.bot_owner_id}")
     if not user.bot:
-        lines.append(f"Phone blocked: {'yes' if blocked else 'no'}")
+        lines.append(f"Телефон заблокирован: {'да' if blocked else 'нет'}")
         if blocked:
-            lines.append(f"Blocked phone: {blocked.phone_number}")
+            lines.append(f"Заблокированный телефон: {blocked.phone_number}")
 
     rows = [
         KeyboardButtonRow(buttons=[
             KeyboardButtonCallback(
-                text="♻️ Restore account",
+                text="♻️ Восстановить аккаунт",
                 data=f"adm:act:restore:{user.id}:{list_key}".encode(),
             ),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="« Deleted list", data=f"adm:del:{list_key[1:]}".encode()),
-            KeyboardButtonCallback(text="« Main menu", data=HOME),
+            KeyboardButtonCallback(text="« Удалённые", data=f"adm:del:{list_key[1:]}".encode()),
+            KeyboardButtonCallback(text="« Главное меню", data=HOME),
         ]),
     ]
     return await edit_bot_message(menu, peer, "\n".join(lines), ReplyInlineMarkup(rows=rows))
@@ -177,8 +177,8 @@ def _bot_label(user: User, *, username: str | None = None) -> str:
 def _bot_back_row(list_key: str) -> KeyboardButtonRow:
     page, show_system = parse_bot_list_key(list_key)
     return KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="« Bots", data=bots_list_callback(page, show_system=show_system)),
-        KeyboardButtonCallback(text="« Main menu", data=HOME),
+        KeyboardButtonCallback(text="« Боты", data=bots_list_callback(page, show_system=show_system)),
+        KeyboardButtonCallback(text="« Главное меню", data=HOME),
     ])
 
 
@@ -200,8 +200,8 @@ async def page_bots(peer: Peer, page: int, menu: MessageRef, *, show_system: boo
     chunk = bots[page * PAGE_SIZE:(page + 1) * PAGE_SIZE] if total else []
     usernames = await _usernames_for_users(chunk)
 
-    scope = "all bots" if show_system else "user bots"
-    text = f"🤖 Bots ({total}, {scope}). Tap to manage:"
+    scope = "все боты" if show_system else "пользовательские боты"
+    text = f"🤖 Боты ({total}, {scope}). Нажмите для управления:"
     items = [
         (_bot_label(u, username=usernames.get(u.id)), f"adm:bot:{u.id}:{list_key}".encode())
         for u in chunk
@@ -211,13 +211,13 @@ async def page_bots(peer: Peer, page: int, menu: MessageRef, *, show_system: boo
     keyboard = list_keyboard(
         items=items, page=page, total_pages=total_pages, page_prefix=page_prefix,
     )
-    toggle_label = "✅ Show system" if show_system else "☑️ Show system"
+    toggle_label = "✅ Показать системных" if show_system else "☑️ Показать системных"
     keyboard.rows.insert(0, KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="🔍 Find bot", data=b"adm:find:bot"),
+        KeyboardButtonCallback(text="🔍 Найти бота", data=b"adm:find:bot"),
         KeyboardButtonCallback(text=toggle_label, data=bots_list_callback(page, show_system=not show_system)),
     ]))
     if total == 0:
-        text = f"🤖 No bots ({scope})."
+        text = f"🤖 Нет ботов ({scope})."
     return await edit_bot_message(menu, peer, text, keyboard)
 
 
@@ -225,25 +225,25 @@ async def page_bot_unsystem_warning(
         peer: Peer, bot_id: int, menu: MessageRef, *, list_key: str = "b0",
 ) -> MessageRef:
     username = await Username.filter(user_id=bot_id).first().values_list("username", flat=True)
-    handle = f"@{username}" if username else f"bot {bot_id}"
+    handle = f"@{username}" if username else f"бот {bot_id}"
     lines = [
-        f"⚠️ Warning — {handle}",
+        f"⚠️ Предупреждение — {handle}",
         "",
-        "Removing the system flag from @admin will break built-in handlers:",
-        "• Inline button callbacks stop routing to the admin panel",
-        "• Outgoing messages to the bot use a different delivery path",
+        "Снятие системного флага с @admin нарушит работу встроенных обработчиков:",
+        "• Callback-кнопки перестанут открывать админ-панель",
+        "• Исходящие сообщения боту пойдут по другому пути доставки",
         "",
-        "You will lose the admin panel until the system flag is restored.",
+        "Админ-панель будет недоступна, пока системный флаг не восстановят.",
     ]
     rows = [
         KeyboardButtonRow(buttons=[
             KeyboardButtonCallback(
-                text="Yes, remove system flag",
+                text="Да, снять системный флаг",
                 data=f"adm:act:unsystemok:bot:{bot_id}:{list_key}".encode(),
             ),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="« Cancel", data=f"adm:bot:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="« Отмена", data=f"adm:bot:{bot_id}:{list_key}".encode()),
         ]),
     ]
     return await edit_bot_message(menu, peer, "\n".join(lines), ReplyInlineMarkup(rows=rows))
@@ -257,8 +257,8 @@ async def page_bot(
     if bot_user is None:
         markup = ReplyInlineMarkup(rows=[back_home_row()])
         if overlay or new_message:
-            return await push_bot_message(peer, "Bot not found.", markup)
-        return await edit_bot_message(menu, peer, "Bot not found.", markup)
+            return await push_bot_message(peer, "Бот не найден.", markup)
+        return await edit_bot_message(menu, peer, "Бот не найден.", markup)
 
     username = await bot_user.get_raw_username()
     bot_row = await Bot.get_or_none(bot_id=bot_id).select_related("owner")
@@ -273,19 +273,19 @@ async def page_bot(
     lines = [
         f"🤖 {display_name}",
         f"ID: {bot_user.id}",
-        f"Username: @{username}" if username else "Username: —",
-        f"Verified: {'yes ✓' if bot_user.verified else 'no'}",
-        f"System: {'yes ⚙' if bot_user.system else 'no'}",
-        f"Commands: {commands_count}",
+        f"Юзернейм: @{username}" if username else "Юзернейм: —",
+        f"Верифицирован: {'да ✓' if bot_user.verified else 'нет'}",
+        f"Системный: {'да ⚙' if bot_user.system else 'нет'}",
+        f"Команды: {commands_count}",
     ]
     if bot_user.about:
-        lines.append(f"About: {bot_user.about[:100]}")
+        lines.append(f"О боте: {bot_user.about[:100]}")
     if info and info.description:
-        lines.append(f"Description: {info.description[:100]}")
+        lines.append(f"Описание: {info.description[:100]}")
     if owner:
-        lines.append(f"Owner: {owner.first_name} (id {owner.id})")
+        lines.append(f"Владелец: {owner.first_name} (id {owner.id})")
     elif bot_user.system:
-        lines.append("Owner: — (system bot)")
+        lines.append("Владелец: — (системный бот)")
 
     text = "\n".join(lines)
     entities = tme_username_entities(text, username) if username else None
@@ -293,22 +293,22 @@ async def page_bot(
     rows: list[KeyboardButtonRow] = []
     if username:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonUrl(text=f"Open @{username}", url=f"https://t.me/{username}"),
+            KeyboardButtonUrl(text=f"Открыть @{username}", url=f"https://t.me/{username}"),
         ]))
     rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="🔑 API token", data=f"adm:bot:token:{bot_id}:{list_key}".encode()),
-        KeyboardButtonCallback(text="⚙️ Settings", data=f"adm:bot:set:{bot_id}:{list_key}".encode()),
+        KeyboardButtonCallback(text="🔑 API-токен", data=f"adm:bot:token:{bot_id}:{list_key}".encode()),
+        KeyboardButtonCallback(text="⚙️ Настройки", data=f"adm:bot:set:{bot_id}:{list_key}".encode()),
     ]))
     owner_row: list[KeyboardButtonCallback] = []
     if owner:
-        owner_row.append(KeyboardButtonCallback(text="👤 Owner", data=user_open_link(owner.id, list_key)))
+        owner_row.append(KeyboardButtonCallback(text="👤 Владелец", data=user_open_link(owner.id, list_key)))
     if bot_user.verified:
         owner_row.append(KeyboardButtonCallback(
-            text="Remove ✓", data=f"adm:act:unverify:bot:{bot_id}:{list_key}".encode(),
+            text="Снять ✓", data=f"adm:act:unverify:bot:{bot_id}:{list_key}".encode(),
         ))
     else:
         owner_row.append(KeyboardButtonCallback(
-            text="Grant ✓", data=f"adm:act:verify:bot:{bot_id}:{list_key}".encode(),
+            text="Выдать ✓", data=f"adm:act:verify:bot:{bot_id}:{list_key}".encode(),
         ))
     if owner_row:
         rows.append(KeyboardButtonRow(buttons=owner_row))
@@ -316,14 +316,14 @@ async def page_bot(
     if bot_user.system:
         from piltover.app.utils.admin_access import is_builtin_admin_bot
 
-        unsystem_label = "⚠️ Remove system flag" if await is_builtin_admin_bot(bot_user) else "Remove system flag"
+        unsystem_label = "⚠️ Снять системный флаг" if await is_builtin_admin_bot(bot_user) else "Снять системный флаг"
         rows.append(KeyboardButtonRow(buttons=[
             KeyboardButtonCallback(text=unsystem_label, data=f"adm:act:unsystem:bot:{bot_id}:{list_key}".encode()),
         ]))
     else:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Mark as system", data=f"adm:act:system:bot:{bot_id}:{list_key}".encode()),
-            KeyboardButtonCallback(text="🗑 Delete", data=f"adm:act:delbot:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="Пометить как системный", data=f"adm:act:system:bot:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="🗑 Удалить", data=f"adm:act:delbot:{bot_id}:{list_key}".encode()),
         ]))
     if overlay:
         rows.append(hide_row())
@@ -338,26 +338,26 @@ async def page_bot(
 async def page_bot_token(peer: Peer, bot_id: int, menu: MessageRef, *, list_key: str = "b0") -> MessageRef:
     bot_user = await _get_bot_user(bot_id)
     if bot_user is None:
-        return await edit_bot_message(menu, peer, "Bot not found.", ReplyInlineMarkup(rows=[back_home_row()]))
+        return await edit_bot_message(menu, peer, "Бот не найден.", ReplyInlineMarkup(rows=[back_home_row()]))
 
     bot_row = await Bot.get_or_none(bot_id=bot_id)
     if bot_row is None:
-        return await edit_bot_message(menu, peer, "Bot record not found.", ReplyInlineMarkup(rows=[_bot_back_row(list_key)]))
+        return await edit_bot_message(menu, peer, "Запись бота не найдена.", ReplyInlineMarkup(rows=[_bot_back_row(list_key)]))
 
     token = f"{bot_id}:{bot_row.token_nonce}"
     lines = [
-        f"🔑 API token — {bot_user.first_name}",
+        f"🔑 API-токен — {bot_user.first_name}",
         "",
         token,
         "",
-        "Use with Bot API: /bot<token>/<method>",
+        "Использование с Bot API: /bot<token>/<method>",
     ]
     rows = [
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Revoke token", data=f"adm:act:revtoken:bot:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="Отозвать токен", data=f"adm:act:revtoken:bot:{bot_id}:{list_key}".encode()),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="« Back to bot", data=f"adm:bot:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="« К боту", data=f"adm:bot:{bot_id}:{list_key}".encode()),
         ]),
     ]
     return await edit_bot_message(menu, peer, "\n".join(lines), ReplyInlineMarkup(rows=rows))
@@ -370,8 +370,8 @@ async def page_bot_settings(
     if bot_user is None:
         markup = ReplyInlineMarkup(rows=[back_home_row()])
         if new_message:
-            return await push_bot_message(peer, "Bot not found.", markup)
-        return await edit_bot_message(menu, peer, "Bot not found.", markup)
+            return await push_bot_message(peer, "Бот не найден.", markup)
+        return await edit_bot_message(menu, peer, "Бот не найден.", markup)
 
     info = await BotInfo.get_or_none(user_id=bot_id)
     commands = list(await BotCommand.filter(bot_id=bot_id).order_by("name").limit(12))
@@ -381,21 +381,21 @@ async def page_bot_settings(
     if bot_user.last_name:
         display_name = f"{display_name} {bot_user.last_name}"
 
-    lines = [f"⚙️ Settings — {display_name}", ""]
-    lines.append(f"Name: {bot_user.first_name}")
-    lines.append(f"Last name: {bot_user.last_name or '—'}")
-    lines.append(f"Username: @{username}" if username else "Username: —")
-    lines.append(f"About: {bot_user.about or '—'}")
+    lines = [f"⚙️ Настройки — {display_name}", ""]
+    lines.append(f"Имя: {bot_user.first_name}")
+    lines.append(f"Фамилия: {bot_user.last_name or '—'}")
+    lines.append(f"Юзернейм: @{username}" if username else "Юзернейм: —")
+    lines.append(f"О боте: {bot_user.about or '—'}")
     if info is None:
-        lines.append("Description: —")
-        lines.append("Privacy policy: —")
+        lines.append("Описание: —")
+        lines.append("Политика конфиденциальности: —")
     else:
-        lines.append(f"Description: {info.description or '—'}")
-        lines.append(f"Privacy policy: {info.privacy_policy_url or '—'}")
-        lines.append(f"BotInfo version: {info.version}")
+        lines.append(f"Описание: {info.description or '—'}")
+        lines.append(f"Политика конфиденциальности: {info.privacy_policy_url or '—'}")
+        lines.append(f"Версия BotInfo: {info.version}")
 
     lines.append("")
-    lines.append(f"Commands ({len(commands)}):")
+    lines.append(f"Команды ({len(commands)}):")
     if not commands:
         lines.append("—")
     else:
@@ -404,8 +404,8 @@ async def page_bot_settings(
 
     rows = [
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="✏️ Name", data=f"adm:bot:edit:name:{bot_id}:{list_key}".encode()),
-            KeyboardButtonCallback(text="✏️ Last name", data=f"adm:bot:edit:lastname:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="✏️ Имя", data=f"adm:bot:edit:name:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="✏️ Фамилия", data=f"adm:bot:edit:lastname:{bot_id}:{list_key}".encode()),
         ]),
     ]
     if not bot_user.system:
@@ -414,14 +414,14 @@ async def page_bot_settings(
         ]))
     rows.extend([
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="✏️ About", data=f"adm:bot:edit:about:{bot_id}:{list_key}".encode()),
-            KeyboardButtonCallback(text="✏️ Description", data=f"adm:bot:edit:desc:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="✏️ О боте", data=f"adm:bot:edit:about:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="✏️ Описание", data=f"adm:bot:edit:desc:{bot_id}:{list_key}".encode()),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="✏️ Privacy URL", data=f"adm:bot:edit:privacy:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="✏️ URL политики", data=f"adm:bot:edit:privacy:{bot_id}:{list_key}".encode()),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="« Back to bot", data=f"adm:bot:{bot_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="« К боту", data=f"adm:bot:{bot_id}:{list_key}".encode()),
         ]),
     ])
     markup = ReplyInlineMarkup(rows=rows)
@@ -437,51 +437,51 @@ async def page_channel(
     if channel is None:
         markup = ReplyInlineMarkup(rows=[back_home_row()])
         if new_message:
-            return await push_bot_message(peer, "Channel not found.", markup)
-        return await edit_bot_message(menu, peer, "Channel not found.", markup)
+            return await push_bot_message(peer, "Канал не найден.", markup)
+        return await edit_bot_message(menu, peer, "Канал не найден.", markup)
 
-    kind = "channel" if channel.channel else "supergroup"
+    kind = "канал" if channel.channel else "супергруппа"
     username_row = await Username.get_or_none(channel_id=channel.id)
     creator = await User.get_or_none(id=channel.creator_id)
 
     lines = [
         f"📢 [{kind}] {channel.name}",
         f"ID: {channel.make_id()}",
-        f"DB id: {channel.id}",
-        f"Username: @{username_row.username}" if username_row else "Username: —",
-        f"Members: {channel.participants_count}",
-        f"Admins: {channel.admins_count}",
-        f"Verified: {'yes' if channel.verified else 'no'}",
-        f"Creator: {creator.first_name if creator else '—'} (id {channel.creator_id})",
+        f"ID в БД: {channel.id}",
+        f"Юзернейм: @{username_row.username}" if username_row else "Юзернейм: —",
+        f"Участники: {channel.participants_count}",
+        f"Админы: {channel.admins_count}",
+        f"Верифицирован: {'да' if channel.verified else 'нет'}",
+        f"Создатель: {creator.first_name if creator else '—'} (id {channel.creator_id})",
     ]
     if channel.description:
-        lines.append(f"About: {channel.description[:120]}")
+        lines.append(f"Описание: {channel.description[:120]}")
 
     rows = [
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="👥 Members", data=f"adm:ch:mem:{channel_id}:0:{list_key}".encode()),
-            KeyboardButtonCallback(text="🛡 Admins", data=f"adm:ch:adm:{channel_id}:0:{list_key}".encode()),
+            KeyboardButtonCallback(text="👥 Участники", data=f"adm:ch:mem:{channel_id}:0:{list_key}".encode()),
+            KeyboardButtonCallback(text="🛡 Админы", data=f"adm:ch:adm:{channel_id}:0:{list_key}".encode()),
         ]),
         KeyboardButtonRow(buttons=[
             KeyboardButtonCallback(
-                text="Remove ✓" if channel.verified else "Grant ✓",
+                text="Снять ✓" if channel.verified else "Выдать ✓",
                 data=(
                     f"adm:act:uv:ch:{channel_id}:{list_key}".encode()
                     if channel.verified else f"adm:act:v:ch:{channel_id}:{list_key}".encode()
                 ),
             ),
-            KeyboardButtonCallback(text="Delete", data=f"adm:act:delch:{channel_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="Удалить", data=f"adm:act:delch:{channel_id}:{list_key}".encode()),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Transfer owner", data=f"adm:ch:own:{channel_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="Передать владельца", data=f"adm:ch:own:{channel_id}:{list_key}".encode()),
         ]),
     ]
     if new_message:
         rows.append(hide_row())
     else:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="« Channels", data=f"adm:channels:{list_key[1:]}".encode()),
-            KeyboardButtonCallback(text="« Main menu", data=HOME),
+            KeyboardButtonCallback(text="« Каналы", data=f"adm:channels:{list_key[1:]}".encode()),
+            KeyboardButtonCallback(text="« Главное меню", data=HOME),
         ]))
     markup = ReplyInlineMarkup(rows=rows)
     if new_message:
@@ -496,28 +496,28 @@ async def page_group(
     if chat is None:
         markup = ReplyInlineMarkup(rows=[back_home_row()])
         if new_message:
-            return await push_bot_message(peer, "Group not found.", markup)
-        return await edit_bot_message(menu, peer, "Group not found.", markup)
+            return await push_bot_message(peer, "Группа не найдена.", markup)
+        return await edit_bot_message(menu, peer, "Группа не найдена.", markup)
 
     creator = await User.get_or_none(id=chat.creator_id)
     lines = [
         f"💬 {chat.name}",
         f"ID: {chat.make_id()}",
-        f"Members: {chat.participants_count}",
-        f"Verified: {'yes' if chat.verified else 'no'}",
-        f"Creator: {creator.first_name if creator else '—'} (id {chat.creator_id})",
+        f"Участники: {chat.participants_count}",
+        f"Верифицирован: {'да' if chat.verified else 'нет'}",
+        f"Создатель: {creator.first_name if creator else '—'} (id {chat.creator_id})",
     ]
     if chat.description:
-        lines.append(f"About: {chat.description[:120]}")
+        lines.append(f"Описание: {chat.description[:120]}")
 
     rows = [
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="👥 Members", data=f"adm:gr:mem:{chat_id}:0:{list_key}".encode()),
-            KeyboardButtonCallback(text="🛡 Admins", data=f"adm:gr:adm:{chat_id}:0:{list_key}".encode()),
+            KeyboardButtonCallback(text="👥 Участники", data=f"adm:gr:mem:{chat_id}:0:{list_key}".encode()),
+            KeyboardButtonCallback(text="🛡 Админы", data=f"adm:gr:adm:{chat_id}:0:{list_key}".encode()),
         ]),
         KeyboardButtonRow(buttons=[
             KeyboardButtonCallback(
-                text="Remove ✓" if chat.verified else "Grant ✓",
+                text="Снять ✓" if chat.verified else "Выдать ✓",
                 data=(
                     f"adm:act:uv:g:{chat_id}:{list_key}".encode()
                     if chat.verified else f"adm:act:v:g:{chat_id}:{list_key}".encode()
@@ -525,15 +525,15 @@ async def page_group(
             ),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Transfer owner", data=f"adm:gr:own:{chat_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="Передать владельца", data=f"adm:gr:own:{chat_id}:{list_key}".encode()),
         ]),
     ]
     if new_message:
         rows.append(hide_row())
     else:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="« Groups", data=f"adm:groups:{list_key[1:]}".encode()),
-            KeyboardButtonCallback(text="« Main menu", data=HOME),
+            KeyboardButtonCallback(text="« Группы", data=f"adm:groups:{list_key[1:]}".encode()),
+            KeyboardButtonCallback(text="« Главное меню", data=HOME),
         ]))
     markup = ReplyInlineMarkup(rows=rows)
     if new_message:
@@ -546,9 +546,9 @@ async def _member_lines(participants: list[ChatParticipant], users_map: dict[int
     for p in participants:
         u = users_map.get(p.user_id)
         name = u.first_name if u else str(p.user_id)
-        role = "creator" if p.admin_rights else ("admin" if p.is_admin else "member")
+        role = "создатель" if p.admin_rights else ("админ" if p.is_admin else "участник")
         if p.left:
-            role = "left"
+            role = "вышел"
         lines.append(f"• {name} (id {p.user_id}) — {role}")
     return lines
 
@@ -562,7 +562,7 @@ async def page_channel_admins(
 ) -> MessageRef:
     channel = await Channel.get_or_none(id=channel_id, deleted=False)
     if channel is None:
-        return await edit_bot_message(menu, peer, "Not found.", ReplyInlineMarkup(rows=[back_home_row()]))
+        return await edit_bot_message(menu, peer, "Не найдено.", ReplyInlineMarkup(rows=[back_home_row()]))
 
     all_participants = list(
         await ChatParticipant.filter(channel_id=channel_id, left=False).order_by("-admin_rights", "user_id"),
@@ -573,7 +573,7 @@ async def page_channel_admins(
     user_ids = [p.user_id for p in chunk]
     users_map = {u.id: u for u in await User.filter(id__in=user_ids)} if user_ids else {}
 
-    lines = [f"🛡 Admins of {channel.name} ({total})", ""]
+    lines = [f"🛡 Админы {channel.name} ({total})", ""]
     lines.extend(await _member_lines(chunk, users_map))
 
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -581,7 +581,7 @@ async def page_channel_admins(
     for p in chunk:
         name = users_map[p.user_id].first_name if p.user_id in users_map else str(p.user_id)
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text=f"Open {name[:24]}", data=user_open_link(p.user_id, list_key)),
+            KeyboardButtonCallback(text=f"Открыть {name[:24]}", data=user_open_link(p.user_id, list_key)),
         ]))
 
     nav: list[KeyboardButtonCallback] = []
@@ -592,7 +592,7 @@ async def page_channel_admins(
     if nav:
         rows.append(KeyboardButtonRow(buttons=nav))
     rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="« Channel", data=f"adm:ch:{channel_id}:{list_key}".encode()),
+        KeyboardButtonCallback(text="« Канал", data=f"adm:ch:{channel_id}:{list_key}".encode()),
     ]))
     return await edit_bot_message(menu, peer, "\n".join(lines), ReplyInlineMarkup(rows=rows))
 
@@ -602,7 +602,7 @@ async def page_group_admins(
 ) -> MessageRef:
     chat = await Chat.get_or_none(id=chat_id, deleted=False)
     if chat is None:
-        return await edit_bot_message(menu, peer, "Not found.", ReplyInlineMarkup(rows=[back_home_row()]))
+        return await edit_bot_message(menu, peer, "Не найдено.", ReplyInlineMarkup(rows=[back_home_row()]))
 
     all_participants = list(
         await ChatParticipant.filter(chat_id=chat_id).order_by("-admin_rights", "user_id"),
@@ -613,7 +613,7 @@ async def page_group_admins(
     user_ids = [p.user_id for p in chunk]
     users_map = {u.id: u for u in await User.filter(id__in=user_ids)} if user_ids else {}
 
-    lines = [f"🛡 Admins of {chat.name} ({total})", ""]
+    lines = [f"🛡 Админы {chat.name} ({total})", ""]
     lines.extend(await _member_lines(chunk, users_map))
 
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -621,7 +621,7 @@ async def page_group_admins(
     for p in chunk:
         name = users_map[p.user_id].first_name if p.user_id in users_map else str(p.user_id)
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text=f"Open {name[:24]}", data=user_open_link(p.user_id, list_key)),
+            KeyboardButtonCallback(text=f"Открыть {name[:24]}", data=user_open_link(p.user_id, list_key)),
         ]))
 
     nav: list[KeyboardButtonCallback] = []
@@ -632,7 +632,7 @@ async def page_group_admins(
     if nav:
         rows.append(KeyboardButtonRow(buttons=nav))
     rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="« Group", data=f"adm:gr:{chat_id}:{list_key}".encode()),
+        KeyboardButtonCallback(text="« Группа", data=f"adm:gr:{chat_id}:{list_key}".encode()),
     ]))
     return await edit_bot_message(menu, peer, "\n".join(lines), ReplyInlineMarkup(rows=rows))
 
@@ -642,7 +642,7 @@ async def page_channel_members(
 ) -> MessageRef:
     channel = await Channel.get_or_none(id=channel_id, deleted=False)
     if channel is None:
-        return await edit_bot_message(menu, peer, "Not found.", ReplyInlineMarkup(rows=[back_home_row()]))
+        return await edit_bot_message(menu, peer, "Не найдено.", ReplyInlineMarkup(rows=[back_home_row()]))
 
     total = await ChatParticipant.filter(channel_id=channel_id, left=False).count()
     participants = list(
@@ -652,7 +652,7 @@ async def page_channel_members(
     user_ids = [p.user_id for p in participants]
     users_map = {u.id: u for u in await User.filter(id__in=user_ids)} if user_ids else {}
 
-    lines = [f"👥 Members of {channel.name} ({total})", ""]
+    lines = [f"👥 Участники {channel.name} ({total})", ""]
     lines.extend(await _member_lines(participants, users_map))
 
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -661,11 +661,11 @@ async def page_channel_members(
         if p.user_id != channel.creator_id:
             rows.append(KeyboardButtonRow(buttons=[
                 KeyboardButtonCallback(
-                    text=f"Kick {users_map[p.user_id].first_name[:20] if p.user_id in users_map else p.user_id}",
+                    text=f"Исключить {users_map[p.user_id].first_name[:20] if p.user_id in users_map else p.user_id}",
                     data=f"adm:act:kickch:{channel_id}:{p.user_id}:{list_key}".encode(),
                 ),
                 KeyboardButtonCallback(
-                    text="Make admin",
+                    text="Сделать админом",
                     data=f"adm:act:admch:{channel_id}:{p.user_id}:{list_key}".encode(),
                 ),
             ]))
@@ -678,7 +678,7 @@ async def page_channel_members(
     if nav:
         rows.append(KeyboardButtonRow(buttons=nav))
     rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="« Channel", data=f"adm:ch:{channel_id}:{list_key}".encode()),
+        KeyboardButtonCallback(text="« Канал", data=f"adm:ch:{channel_id}:{list_key}".encode()),
     ]))
     return await edit_bot_message(menu, peer, "\n".join(lines), ReplyInlineMarkup(rows=rows))
 
@@ -688,7 +688,7 @@ async def page_group_members(
 ) -> MessageRef:
     chat = await Chat.get_or_none(id=chat_id, deleted=False)
     if chat is None:
-        return await edit_bot_message(menu, peer, "Not found.", ReplyInlineMarkup(rows=[back_home_row()]))
+        return await edit_bot_message(menu, peer, "Не найдено.", ReplyInlineMarkup(rows=[back_home_row()]))
 
     total = await ChatParticipant.filter(chat_id=chat_id).count()
     participants = list(
@@ -698,7 +698,7 @@ async def page_group_members(
     user_ids = [p.user_id for p in participants]
     users_map = {u.id: u for u in await User.filter(id__in=user_ids)} if user_ids else {}
 
-    lines = [f"👥 Members of {chat.name} ({total})", ""]
+    lines = [f"👥 Участники {chat.name} ({total})", ""]
     lines.extend(await _member_lines(participants, users_map))
 
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -707,11 +707,11 @@ async def page_group_members(
         if p.user_id != chat.creator_id:
             rows.append(KeyboardButtonRow(buttons=[
                 KeyboardButtonCallback(
-                    text=f"Kick {(users_map[p.user_id].first_name if p.user_id in users_map else p.user_id)}"[:24],
+                    text=f"Исключить {(users_map[p.user_id].first_name if p.user_id in users_map else p.user_id)}"[:24],
                     data=f"adm:act:kickgr:{chat_id}:{p.user_id}:{list_key}".encode(),
                 ),
                 KeyboardButtonCallback(
-                    text="Make admin",
+                    text="Сделать админом",
                     data=f"adm:act:admgr:{chat_id}:{p.user_id}:{list_key}".encode(),
                 ),
             ]))
@@ -724,7 +724,7 @@ async def page_group_members(
     if nav:
         rows.append(KeyboardButtonRow(buttons=nav))
     rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="« Group", data=f"adm:gr:{chat_id}:{list_key}".encode()),
+        KeyboardButtonCallback(text="« Группа", data=f"adm:gr:{chat_id}:{list_key}".encode()),
     ]))
     return await edit_bot_message(menu, peer, "\n".join(lines), ReplyInlineMarkup(rows=rows))
 
@@ -749,9 +749,9 @@ async def page_reports(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
     for r in chunk:
         items.append((await _report_list_label(r), f"adm:report:{r.id}:r{page}".encode()))
 
-    text = f"📩 Reports ({total}, {pending} pending). Tap for details:"
+    text = f"📩 Репорты ({total}, {pending} ожидают). Нажмите для подробностей:"
     if total == 0:
-        text = "📩 No reports yet."
+        text = "📩 Репортов пока нет."
     return await edit_bot_message(
         menu, peer, text, list_keyboard(
             items=items, page=page, total_pages=total_pages, page_prefix=b"adm:reports",
@@ -766,8 +766,8 @@ async def page_report(
     if report is None:
         markup = ReplyInlineMarkup(rows=[back_home_row()])
         if overlay:
-            return await push_bot_message(peer, "Report not found.", markup)
-        return await edit_bot_message(menu, peer, "Report not found.", markup)
+            return await push_bot_message(peer, "Репорт не найден.", markup)
+        return await edit_bot_message(menu, peer, "Репорт не найден.", markup)
 
     lines = await build_report_detail_lines(report)
     ctx = await get_report_context(report)
@@ -776,21 +776,21 @@ async def page_report(
     if report.peer_type is AdminReportPeerType.USER:
         if ctx.target_is_bot:
             rows.append(KeyboardButtonRow(buttons=[
-                KeyboardButtonCallback(text="🤖 Open bot", data=bot_open_link(report.peer_id, list_key)),
+                KeyboardButtonCallback(text="🤖 Открыть бота", data=bot_open_link(report.peer_id, list_key)),
                 KeyboardButtonCallback(
-                    text="🗑 Ban bot",
+                    text="🗑 Забанить бота",
                     data=f"adm:act:banbotrep:{report_id}:{report.peer_id}:{list_key}".encode(),
                 ),
             ]))
         else:
             rows.append(KeyboardButtonRow(buttons=[
-                KeyboardButtonCallback(text="👤 Open user", data=user_open_link(report.peer_id, list_key)),
+                KeyboardButtonCallback(text="👤 Открыть пользователя", data=user_open_link(report.peer_id, list_key)),
                 KeyboardButtonCallback(
-                    text="🚫 Spam block",
+                    text="🚫 Спам-блок",
                     data=f"adm:act:spamrep:{report_id}:{report.peer_id}:{list_key}".encode(),
                 ),
                 KeyboardButtonCallback(
-                    text="🗑 Ban user",
+                    text="🗑 Забанить пользователя",
                     data=f"adm:act:banrep:{report_id}:{report.peer_id}:{list_key}".encode(),
                 ),
             ]))
@@ -798,111 +798,111 @@ async def page_report(
             author_row = []
             if ctx.author_is_bot:
                 author_row.append(KeyboardButtonCallback(
-                    text="🤖 Open author bot", data=bot_open_link(ctx.author_id, list_key),
+                    text="🤖 Открыть бота автора", data=bot_open_link(ctx.author_id, list_key),
                 ))
                 author_row.append(KeyboardButtonCallback(
-                    text="🗑 Ban author bot",
+                    text="🗑 Забанить бота автора",
                     data=f"adm:act:banbotrep:{report_id}:{ctx.author_id}:{list_key}".encode(),
                 ))
             else:
                 author_row.append(KeyboardButtonCallback(
-                    text="👤 Open author", data=user_open_link(ctx.author_id, list_key),
+                    text="👤 Открыть автора", data=user_open_link(ctx.author_id, list_key),
                 ))
                 author_row.append(KeyboardButtonCallback(
-                    text="🚫 Spam author",
+                    text="🚫 Спам-блок автора",
                     data=f"adm:act:spamauthrep:{report_id}:{ctx.author_id}:{list_key}".encode(),
                 ))
                 author_row.append(KeyboardButtonCallback(
-                    text="🗑 Ban author",
+                    text="🗑 Забанить автора",
                     data=f"adm:act:banrep:{report_id}:{ctx.author_id}:{list_key}".encode(),
                 ))
             rows.append(KeyboardButtonRow(buttons=author_row))
     elif report.peer_type is AdminReportPeerType.CHANNEL:
         channel_row = [
             KeyboardButtonCallback(
-                text="📢 Open channel",
+                text="📢 Открыть канал",
                 data=f"adm:ch:open:{report.peer_id}:{list_key}".encode(),
             ),
         ]
         if ctx.author_id is not None:
             if ctx.author_is_bot:
                 channel_row.append(KeyboardButtonCallback(
-                    text="🤖 Open author bot", data=bot_open_link(ctx.author_id, list_key),
+                    text="🤖 Открыть бота автора", data=bot_open_link(ctx.author_id, list_key),
                 ))
             else:
                 channel_row.append(KeyboardButtonCallback(
-                    text="👤 Open author", data=user_open_link(ctx.author_id, list_key),
+                    text="👤 Открыть автора", data=user_open_link(ctx.author_id, list_key),
                 ))
         rows.append(KeyboardButtonRow(buttons=channel_row))
         if ctx.author_id is not None:
             if ctx.author_is_bot:
                 rows.append(KeyboardButtonRow(buttons=[
                     KeyboardButtonCallback(
-                        text="🗑 Ban bot",
+                        text="🗑 Забанить бота",
                         data=f"adm:act:banbotrep:{report_id}:{ctx.author_id}:{list_key}".encode(),
                     ),
                 ]))
             else:
                 rows.append(KeyboardButtonRow(buttons=[
                     KeyboardButtonCallback(
-                        text="🗑 Ban author",
+                        text="🗑 Забанить автора",
                         data=f"adm:act:banrep:{report_id}:{ctx.author_id}:{list_key}".encode(),
                     ),
                     KeyboardButtonCallback(
-                        text="🚫 Spam block author",
+                        text="🚫 Спам-блок автора",
                         data=f"adm:act:spamauthrep:{report_id}:{ctx.author_id}:{list_key}".encode(),
                     ),
                 ]))
     elif report.peer_type is AdminReportPeerType.CHAT:
         group_row = [
             KeyboardButtonCallback(
-                text="💬 Open group",
+                text="💬 Открыть группу",
                 data=f"adm:gr:open:{report.peer_id}:{list_key}".encode(),
             ),
         ]
         if ctx.author_id is not None:
             if ctx.author_is_bot:
                 group_row.append(KeyboardButtonCallback(
-                    text="🤖 Open author bot", data=bot_open_link(ctx.author_id, list_key),
+                    text="🤖 Открыть бота автора", data=bot_open_link(ctx.author_id, list_key),
                 ))
             else:
                 group_row.append(KeyboardButtonCallback(
-                    text="👤 Open author", data=user_open_link(ctx.author_id, list_key),
+                    text="👤 Открыть автора", data=user_open_link(ctx.author_id, list_key),
                 ))
         rows.append(KeyboardButtonRow(buttons=group_row))
         if ctx.author_id is not None:
             if ctx.author_is_bot:
                 rows.append(KeyboardButtonRow(buttons=[
                     KeyboardButtonCallback(
-                        text="🗑 Ban bot",
+                        text="🗑 Забанить бота",
                         data=f"adm:act:banbotrep:{report_id}:{ctx.author_id}:{list_key}".encode(),
                     ),
                 ]))
             else:
                 rows.append(KeyboardButtonRow(buttons=[
                     KeyboardButtonCallback(
-                        text="🗑 Ban author",
+                        text="🗑 Забанить автора",
                         data=f"adm:act:banrep:{report_id}:{ctx.author_id}:{list_key}".encode(),
                     ),
                     KeyboardButtonCallback(
-                        text="🚫 Spam block author",
+                        text="🚫 Спам-блок автора",
                         data=f"adm:act:spamauthrep:{report_id}:{ctx.author_id}:{list_key}".encode(),
                     ),
                 ]))
 
     rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="👤 Open reporter", data=user_open_link(report.reporter_id, list_key)),
+        KeyboardButtonCallback(text="👤 Открыть отправителя", data=user_open_link(report.reporter_id, list_key)),
     ]))
     if not report.reviewed:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Mark reviewed", data=f"adm:act:revrep:{report_id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="Отметить рассмотренным", data=f"adm:act:revrep:{report_id}:{list_key}".encode()),
         ]))
     if overlay:
         rows.append(hide_row())
     else:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="« Reports", data=f"adm:reports:{list_key[1:]}".encode()),
-            KeyboardButtonCallback(text="« Main menu", data=HOME),
+            KeyboardButtonCallback(text="« Репорты", data=f"adm:reports:{list_key[1:]}".encode()),
+            KeyboardButtonCallback(text="« Главное меню", data=HOME),
         ]))
     markup = ReplyInlineMarkup(rows=rows)
     if overlay:

@@ -43,6 +43,9 @@ InputUserWithId = (InputUser, InputPeerUser, InputUserFromMessage, InputPeerUser
 
 @handler.on_request(CreateChat, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
 async def create_chat(request: CreateChat, user_id: int) -> InvitedUsers:
+    from piltover.app.utils.server_settings import require_server_feature
+
+    await require_server_feature("group_creation_enabled", error_message="CHAT_WRITE_FORBIDDEN")
     creator = await User.get(id=user_id).only("id", "bot", "spam_blocked")
     await check_spam_blocked_creation(creator)
 

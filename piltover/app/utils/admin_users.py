@@ -15,7 +15,7 @@ async def set_user_admin(user: User, admin: bool) -> bool:
     if not admin and user.admin:
         admin_count = await User.filter(admin=True, bot=False, deleted=False).count()
         if admin_count <= 1:
-            raise LastAdminError("Cannot remove the last admin")
+            raise LastAdminError("Нельзя снять последнего админа")
 
     user.admin = admin
     await user.save(update_fields=["admin"])

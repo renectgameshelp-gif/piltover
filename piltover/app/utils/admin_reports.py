@@ -9,32 +9,32 @@ from piltover.db.models import AdminReport, Channel, Chat, MessageRef, User, Use
 from piltover.tl import KeyboardButtonRow, KeyboardButtonUrl, ReplyInlineMarkup
 
 _REASON_LABELS = {
-    "spam": "Spam",
-    "violence": "Violence",
-    "pornography": "Pornography",
-    "child_abuse": "Child abuse",
-    "copyright": "Copyright",
-    "scam_or_fraud": "Scam or fraud",
-    "illegal_goods": "Illegal goods",
-    "personal_data": "Personal data",
-    "other": "Other",
+    "spam": "Спам",
+    "violence": "Насилие",
+    "pornography": "Порнография",
+    "child_abuse": "Детская эксплуатация",
+    "copyright": "Авторские права",
+    "scam_or_fraud": "Мошенничество",
+    "illegal_goods": "Незаконные товары",
+    "personal_data": "Персональные данные",
+    "other": "Другое",
 }
 
 _PEER_TYPE_LABELS = {
-    AdminReportPeerType.USER: "User",
-    AdminReportPeerType.CHAT: "Basic group",
-    AdminReportPeerType.CHANNEL: "Channel / supergroup",
-    AdminReportPeerType.MESSAGE: "Messages",
+    AdminReportPeerType.USER: "Пользователь",
+    AdminReportPeerType.CHAT: "Обычная группа",
+    AdminReportPeerType.CHANNEL: "Канал / супергруппа",
+    AdminReportPeerType.MESSAGE: "Сообщения",
 }
 
 _MEDIA_LABELS = {
-    MediaType.PHOTO: "Photo",
-    MediaType.DOCUMENT: "Document",
-    MediaType.POLL: "Poll",
-    MediaType.CONTACT: "Contact",
-    MediaType.GEOPOINT: "Location",
-    MediaType.DICE: "Dice",
-    MediaType.INVOICE: "Invoice",
+    MediaType.PHOTO: "Фото",
+    MediaType.DOCUMENT: "Документ",
+    MediaType.POLL: "Опрос",
+    MediaType.CONTACT: "Контакт",
+    MediaType.GEOPOINT: "Геолокация",
+    MediaType.DICE: "Кубик",
+    MediaType.INVOICE: "Инвойс",
 }
 
 _REPORT_NOTIFY = FormatableTextWithEntities(
@@ -334,14 +334,14 @@ async def build_report_detail_lines(report: AdminReport) -> list[str]:
     created = report.created_at.strftime("%Y-%m-%d %H:%M UTC") if report.created_at else "—"
 
     lines = [
-        f"📩 Report #{report.id}",
-        f"Status: {'reviewed ✓' if report.reviewed else 'pending •'}",
-        f"Created: {created}",
+        f"📩 Репорт #{report.id}",
+        f"Статус: {'рассмотрен ✓' if report.reviewed else 'ожидает •'}",
+        f"Создан: {created}",
         "",
-        "Reporter:",
+        "Жалоба от:",
         f"  {reporter_label}",
         "",
-        f"Target ({format_peer_type(report.peer_type)}):",
+        f"Цель ({format_peer_type(report.peer_type)}):",
         f"  {target_label}",
     ]
     for line in target_lines:
@@ -350,13 +350,13 @@ async def build_report_detail_lines(report: AdminReport) -> list[str]:
             report.message_ids
             or ctx.author_id != report.peer_id
     ):
-        lines.extend(["", "Message author:", f"  {await _user_brief(ctx.author_id)}"])
+        lines.extend(["", "Автор сообщения:", f"  {await _user_brief(ctx.author_id)}"])
     lines.extend([
         "",
-        f"Reason: {format_report_reason(report.reason)}",
+        f"Причина: {format_report_reason(report.reason)}",
     ])
     if report.comment:
-        lines.extend(["", "Comment:", report.comment[:500]])
+        lines.extend(["", "Комментарий:", report.comment[:500]])
     snapshots = await _report_message_snapshots(report)
     lines.extend(_format_message_content_block(snapshots))
     return lines
@@ -373,6 +373,9 @@ async def create_admin_report(
         author_id: int | None = None,
         message_snapshot: list[dict] | None = None,
 ) -> AdminReport:
+    from piltover.app.utils.server_settings import require_server_feature
+
+    await require_server_feature("reports_enabled", error_message="REPORTS_DISABLED")
     if message_ids and message_snapshot is None:
         message_snapshot = await fetch_message_snapshots(
             peer_type, peer_id, message_ids, reporter_id=reporter_id,

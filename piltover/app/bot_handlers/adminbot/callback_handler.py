@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-from piltover.app.bot_handlers.adminbot import actions, pages, pages_extended
+from piltover.app.bot_handlers.adminbot import actions, actions_server, pages, pages_extended, pages_server
 from piltover.app.bot_handlers.adminbot.callback_data import split_list_key
-from piltover.db.models import MessageRef, Peer
+from piltover.db.enums import AdminBotState
+from piltover.db.models import AdminBotUserState, MessageRef, Peer
 from piltover.tl.types.messages import BotCallbackAnswer
+
+
+async def _clear_system_input_state(admin_user_id: int) -> None:
+    await AdminBotUserState.filter(
+        user_id=admin_user_id,
+        state__in=[AdminBotState.WAIT_SYSTEM_TARGET, AdminBotState.WAIT_SYSTEM_TEXT],
+    ).delete()
 
 
 def _parse_user_page(data: bytes) -> tuple[int, str]:
@@ -30,12 +38,59 @@ async def adminbot_callback_query_handler(
         peer: Peer, message: MessageRef, data: bytes,
 ) -> BotCallbackAnswer | None:
     if data == b"adm:home":
+        await AdminBotUserState.filter(user_id=peer.owner_id).delete()
         await pages.page_home(peer, message)
         return BotCallbackAnswer(cache_time=0)
 
     if data == b"adm:stats":
         await pages.page_stats(peer, message)
         return BotCallbackAnswer(cache_time=0)
+
+    if data == b"adm:server":
+        await _clear_system_input_state(peer.owner_id)
+        await pages_server.page_server_menu(peer, message)
+        return BotCallbackAnswer(cache_time=0)
+
+    if data == b"adm:cfg":
+        await _clear_system_input_state(peer.owner_id)
+        await pages_server.page_server_config(peer, message)
+        return BotCallbackAnswer(cache_time=0)
+
+    if data == b"adm:fun":
+        await _clear_system_input_state(peer.owner_id)
+        await pages_server.page_server_fun(peer, message)
+        return BotCallbackAnswer(cache_time=0)
+
+    if data == b"adm:notify":
+        return await actions_server.begin_notify_target(peer, message, admin_user_id=peer.owner_id)
+
+    if data == b"adm:notify:all":
+        return await actions_server.begin_notify_broadcast(peer, message, admin_user_id=peer.owner_id)
+
+    if data == b"adm:srvnotif":
+        return await actions_server.begin_srvnotif_menu(peer, message, admin_user_id=peer.owner_id)
+
+    if data.startswith(b"adm:srvnotif:"):
+        suffix = data[13:]
+        if suffix.startswith(b"all:"):
+            popup = suffix[4:] == b"1"
+            return await actions_server.begin_srvnotif_broadcast(
+                peer, message, popup=popup, admin_user_id=peer.owner_id,
+            )
+        popup = suffix == b"1"
+        return await actions_server.begin_srvnotif_target(
+            peer, message, popup=popup, admin_user_id=peer.owner_id,
+        )
+
+    if data == b"adm:fun:code":
+        return await actions_server.begin_fun_target(peer, message, kind="code", admin_user_id=peer.owner_id)
+
+    if data == b"adm:fun:popup":
+        return await actions_server.fun_test_popup_action(peer, message)
+
+    if data.startswith(b"adm:cfg:"):
+        key = data[8:].decode()
+        return await actions_server.toggle_config_action(peer, message, key)
 
     if data.startswith(b"adm:findf:"):
         flag = data[10:].decode()

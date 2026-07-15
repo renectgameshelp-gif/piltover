@@ -256,6 +256,9 @@ async def _phone_call_response(call: PhoneCall, *users: User) -> PhonePhoneCall:
 @handler.on_request(RequestCall_133, ReqHandlerFlags.BOT_NOT_ALLOWED)
 @handler.on_request(RequestCall, ReqHandlerFlags.BOT_NOT_ALLOWED)
 async def request_call(request: RequestCall | RequestCall_133, user: User) -> PhonePhoneCall:
+    from piltover.app.utils.server_settings import require_server_feature
+
+    await require_server_feature("phone_calls_enabled", error_message="CALL_PROTOCOL_COMPAT_LAYER_INVALID")
     _check_protocol(request.protocol)
 
     if len(request.g_a_hash) != 32:

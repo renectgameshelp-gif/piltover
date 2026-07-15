@@ -237,15 +237,16 @@ class Worker(MessageHandler):
         )
 
     @staticmethod
-    def _log_handler_error(call: CallRpc, e: ErrorRpc) -> None:
+    def _log_handler_error(call: CallRpc | CallRpcInternal, e: ErrorRpc) -> None:
         reason = f", reason: {e.reason}" if e.reason is not None else ""
         log = (
             logger.debug
             if e.error_code == 401 and e.error_message == "AUTH_KEY_UNREGISTERED"
             else logger.warning
         )
+        user_id = call.user_id if isinstance(call, CallRpc) else call.as_user
         log(
-            f"{call.obj.tlname()} user={call.user_id}: "
+            f"{call.obj.tlname()} user={user_id}: "
             f"[{e.error_code} {e.error_message}]{reason} request={call.obj!r}",
         )
 
@@ -360,7 +361,7 @@ class Worker(MessageHandler):
             result = RpcError(error_code=e.error_code, error_message=e.error_message)
         except Exception as e:
             logger.opt(exception=e).warning(
-                f"Error while processing {call.obj.tlname()} user={call.user_id} request={call.obj!r}",
+                f"Error while processing {call.obj.tlname()} user={call.as_user} request={call.obj!r}",
             )
             result = RpcError(error_code=500, error_message="Server error")
         finally:

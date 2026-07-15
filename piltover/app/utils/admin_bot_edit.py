@@ -91,9 +91,9 @@ async def apply_bot_field_value(
 
     if field == "name":
         if clear or not value:
-            return "Name cannot be empty."
+            return "Имя не может быть пустым."
         if len(value) > 64:
-            return "Name is too long (max 64)."
+            return "Имя слишком длинное (макс. 64)."
         await set_bot_first_name(bot_user, value)
         return None
 
@@ -102,15 +102,15 @@ async def apply_bot_field_value(
             await set_bot_last_name(bot_user, None)
             return None
         if len(value) > 64:
-            return "Last name is too long (max 64)."
+            return "Фамилия слишком длинная (макс. 64)."
         await set_bot_last_name(bot_user, value)
         return None
 
     if field == "username":
         if bot_user.system:
-            return "System bot username cannot be changed."
+            return "Юзернейм системного бота нельзя менять."
         if clear or not value:
-            return "Bot username cannot be removed."
+            return "Юзернейм бота нельзя удалить."
         try:
             await set_bot_username(bot_user, value)
         except ValueError as exc:
@@ -122,7 +122,7 @@ async def apply_bot_field_value(
             await set_bot_about(bot_user, None)
             return None
         if len(value) > 120:
-            return "About is too long (max 120)."
+            return "«О боте» слишком длинное (макс. 120)."
         await set_bot_about(bot_user, value)
         return None
 
@@ -131,7 +131,7 @@ async def apply_bot_field_value(
             await set_bot_description(bot_user, None)
             return None
         if len(value) > 120:
-            return "Description is too long (max 120)."
+            return "Описание слишком длинное (макс. 120)."
         await set_bot_description(bot_user, value)
         return None
 
@@ -145,7 +145,7 @@ async def apply_bot_field_value(
             return str(exc)
         return None
 
-    return "Unknown field."
+    return "Неизвестное поле."
 
 
 async def set_bot_privacy_policy(bot_user: User, url: str | None) -> None:

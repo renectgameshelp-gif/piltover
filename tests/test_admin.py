@@ -2,6 +2,9 @@ import pytest
 from pyrogram.errors import UserPrivacyRestricted
 from pyrogram.raw.types import UpdateNewMessage
 
+from piltover.app.bot_handlers.adminbot.actions_server import (
+    is_broadcast_target, resolve_notification_target,
+)
 from piltover.app.bot_handlers.adminbot.callback_handler import adminbot_callback_query_handler
 from piltover.app.bot_handlers.adminbot.utils import send_bot_message
 from piltover.app.utils.admin_access import ensure_admin_bot_access, is_admin
@@ -49,7 +52,7 @@ async def test_adminbot_start_for_admin() -> None:
         if user_message.message.from_id.user_id != client.me.id:
             user_message, bot_message = bot_message, user_message
 
-        assert "Admin Panel" in bot_message.message.message
+        assert "Админ-панель" in bot_message.message.message
 
 
 @pytest.mark.asyncio
@@ -104,7 +107,21 @@ async def test_adminbot_grant_admin_callback() -> None:
             peer, menu, f"adm:act:admin:{target.id}".encode(),
         )
         assert answer is not None
-        assert "granted" in (answer.message or "").lower()
+        assert "выдан" in (answer.message or "").lower()
 
         await target.refresh_from_db()
         assert target.admin is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_notification_target_prefers_user_id_over_phone() -> None:
+    by_id = await User.create(phone_number="999888777", first_name="ById", admin=False)
+    assert await resolve_notification_target(str(by_id.id)) == by_id
+
+
+@pytest.mark.asyncio
+async def test_is_broadcast_target_recognizes_aliases() -> None:
+    assert is_broadcast_target("all")
+    assert is_broadcast_target("EVERYONE")
+    assert is_broadcast_target("всем")
+    assert not is_broadcast_target("alice")

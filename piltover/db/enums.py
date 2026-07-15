@@ -335,6 +335,8 @@ class AdminBotState(IntEnum):
     WAIT_TRANSFER_OWNER = 3
     WAIT_MAKE_ADMIN = 4
     WAIT_BOT_EDIT = 5
+    WAIT_SYSTEM_TARGET = 6
+    WAIT_SYSTEM_TEXT = 7
 
 
 class StickersBotState(IntEnum):

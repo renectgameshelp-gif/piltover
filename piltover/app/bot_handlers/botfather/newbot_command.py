@@ -18,6 +18,12 @@ class NewBot(BotInteractionHandler[BotFatherState, BotFatherUserState]):
 
     @staticmethod
     async def _handler(peer: Peer, _message: MessageRef, _state: None) -> MessageRef:
+        from piltover.app.utils.server_settings import get_server_settings
+
+        if not (await get_server_settings()).bot_creation_enabled:
+            return await send_bot_message(
+                peer, "Bot creation is temporarily disabled on this server.",
+            )
         if await Bot.filter(owner_id=peer.owner_id).count() >= APP_CONFIG.max_bots_per_user:
             return await send_bot_message(
                 peer,

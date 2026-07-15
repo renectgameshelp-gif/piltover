@@ -172,6 +172,9 @@ async def _add_user_to_channel(channel: Channel, peer_channel: Peer, user_id: in
 
 @handler.on_request(CreateChannel, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
 async def create_channel(request: CreateChannel, user_id: int) -> Updates:
+    from piltover.app.utils.server_settings import require_server_feature
+
+    await require_server_feature("channel_creation_enabled", error_message="CHANNELS_TOO_MUCH")
     creator = await User.get(id=user_id).only("id", "bot", "spam_blocked")
     await check_spam_blocked_creation(creator)
 

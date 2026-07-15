@@ -159,21 +159,17 @@ async def send_created_messages_internal(
             logger.debug(f"Creating task create_discussion({message_ref.id})...")
             await ctx.worker.call_internal(CreateDiscussionThread(message_id=message_ref.id))
 
+        from piltover.app.utils.bot_api.groups import notify_bot_api_recipients
+        await notify_bot_api_recipients(messages, message_ref.content.author_id)
+
         return await upd.send_message_channel(user.id, peer.channel, message_ref)
 
     if (update := await upd.send_message(user.id, messages)) is None:
         raise Unreachable
 
-    from piltover.app.utils.bot_api import bot_api_updates
+    from piltover.app.utils.bot_api.groups import notify_bot_api_recipients
     author_id = next(iter(messages.values())).content.author_id
-    for msg_peer, message_ref in messages.items():
-        if msg_peer.type is not PeerType.USER or msg_peer.owner_id == author_id:
-            continue
-        if message_ref.content.message is None and message_ref.content.media_id is None:
-            continue
-        owner = await User.get_or_none(id=msg_peer.owner_id)
-        if owner is not None and owner.bot:
-            await bot_api_updates.enqueue_incoming_message(owner, msg_peer, message_ref)
+    await notify_bot_api_recipients(messages, author_id)
 
     if peer.user and peer.user.bot and await peer.user.get_raw_username() in bots.HANDLERS and ctx is not None:
         message_ref = messages[peer]

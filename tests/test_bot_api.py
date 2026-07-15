@@ -9,7 +9,8 @@ from piltover.app.utils.bot_api.auth import resolve_bot_token
 from piltover.app.utils.bot_api.methods import dispatch_method
 from piltover.app.utils.bot_api.server import _handle_bot_api_request
 from piltover.app.utils.bot_api.updates import bot_api_updates
-from piltover.db.models import Bot, BotCommand, User
+from piltover.db.enums import PeerType
+from piltover.db.models import Bot, BotCommand, Chat, ChatParticipant, Peer, User
 from tests.client import TestClient
 from tests.test_bots import _create_bots
 
@@ -192,3 +193,34 @@ async def test_bot_api_forward_message(app_server) -> None:
         assert forwarded["ok"] is True
         assert forwarded["result"]["text"] == "forward me"
         assert "forward_origin" in forwarded["result"]
+
+
+@pytest.mark.asyncio
+async def test_bot_api_group_command_update(app_server) -> None:
+    bot_api_updates.delete_webhook(0, drop_pending_updates=True)
+
+    async with TestClient(phone_number="123456789") as client:
+        db_user = await User.get(phone_number=client.phone_number)
+        bot, = await _create_bots(db_user, 1, username_prefix="api8_")
+        bot_user = await User.get(id=bot.bot_id)
+        bot_api_updates.delete_webhook(bot.bot_id, drop_pending_updates=True)
+
+        group = await client.create_group("bot api group", [])
+        chat = await Chat.get(id=Chat.norm_id(abs(group.id)))
+        await ChatParticipant.create(
+            user_id=bot_user.id, chat_id=chat.id, chat_channel_id=chat.make_id(),
+        )
+        await Peer.get_or_create(owner_id=bot_user.id, chat_id=chat.id, type=PeerType.CHAT)
+
+        await client.send_message(group.id, "/start")
+
+        updates = await bot_api_updates.get_updates(bot.bot_id, timeout=0)
+        assert len(updates) == 1
+        assert updates[0]["message"]["text"] == "/start"
+        assert updates[0]["message"]["chat"]["type"] == "group"
+
+        bot_api_updates.set_can_read_all_group_messages(bot.bot_id, True)
+        await client.send_message(group.id, "hello group")
+        updates = await bot_api_updates.get_updates(bot.bot_id, timeout=0)
+        assert len(updates) == 1
+        assert updates[0]["message"]["text"] == "hello group"

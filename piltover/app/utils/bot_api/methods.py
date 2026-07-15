@@ -12,21 +12,23 @@ from piltover.app.utils.bot_api.media import (
     make_message_media, pick_uploaded_file, process_outgoing_reply_markup, resolve_bot_api_file,
 )
 from piltover.app.utils.bot_api.response import api_error, api_ok
+from piltover.app.utils.bot_api.peers import peer_is_writable, resolve_bot_api_peer
 from piltover.app.utils.bot_api.serialize import (
-    bot_command_to_bot_api, get_file_result, message_to_bot_api, private_chat_to_bot_api, user_to_bot_api,
+    bot_command_to_bot_api, get_file_result, message_to_bot_api, peer_to_bot_api, user_to_bot_api,
 )
 from piltover.app.utils.bot_api.updates import _BotApiConflict, bot_api_updates
 from piltover.app.utils.utils import process_message_entities
 from piltover.context import RequestContext, request_ctx
 from piltover.db.enums import FileType, MediaType, PeerType
-from piltover.db.models import Bot, BotCommand, File, MessageFwdHeader, MessageRef, Peer, User, UserAuthorization, Username
+from piltover.db.models import Bot, BotCommand, ChatParticipant, File, MessageFwdHeader, MessageRef, Peer, User, UserAuthorization
 from piltover.exceptions import ErrorRpc
 from piltover.session import SessionManager
 from piltover.tl import (
     SendMessageCancelAction, SendMessageRecordAudioAction, SendMessageRecordRoundAction,
     SendMessageRecordVideoAction, SendMessageTypingAction, SendMessageUploadAudioAction,
     SendMessageUploadDocumentAction, SendMessageUploadPhotoAction, SendMessageUploadRoundAction,
-    SendMessageUploadVideoAction, UpdateNewMessage, UpdateUserTyping,
+    SendMessageUploadVideoAction, UpdateChannelUserTyping, UpdateChatUserTyping, UpdateNewMessage,
+    UpdateUserTyping,
 )
 import piltover.app.utils.updates_manager as upd
 
@@ -128,18 +130,13 @@ async def _get_updates(bot_user: User, params: dict[str, Any]) -> dict[str, Any]
     return api_ok(updates)
 
 
-async def _resolve_chat_peer(bot_user: User, chat_id: Any) -> Peer | None:
-    if isinstance(chat_id, str):
-        username = chat_id[1:] if chat_id.startswith("@") else chat_id
-        resolved = await Username.get_or_none(username=username).select_related("user")
-        if resolved is None or resolved.user_id is None:
-            return None
-        chat_id = resolved.user_id
-
-    chat_id = int(chat_id)
-    return await Peer.get_or_create_for_user(
-        bot_user.id, chat_id, select_related=("user", "user__username"),
-    )
+async def _require_writable_peer(bot_user: User, chat_id: Any) -> Peer | dict[str, Any]:
+    peer = await resolve_bot_api_peer(bot_user, chat_id)
+    if peer is None:
+        return api_error("Bad Request: chat not found")
+    if not await peer_is_writable(bot_user, peer):
+        return api_error("Bad Request: bot is not allowed to send messages in this chat", error_code=403)
+    return peer
 
 
 def _worker_context(bot_user: User, auth_id: int):
@@ -200,11 +197,9 @@ async def _send_message(bot_user: User, params: dict[str, Any]) -> dict[str, Any
     if text is None:
         return api_error("Bad Request: text is required")
 
-    peer = await _resolve_chat_peer(bot_user, chat_id)
-    if peer is None:
-        return api_error("Bad Request: chat not found")
-    if peer.type is not PeerType.USER:
-        return api_error("Bad Request: only private chats are supported")
+    peer = await _require_writable_peer(bot_user, chat_id)
+    if isinstance(peer, dict):
+        return peer
 
     auth = await UserAuthorization.get_or_none(user_id=bot_user.id)
     ctx_token = _worker_context(bot_user, auth.id if auth is not None else 0)
@@ -242,11 +237,9 @@ async def _send_media(
     if chat_id is None:
         return api_error("Bad Request: chat_id is required")
 
-    peer = await _resolve_chat_peer(bot_user, chat_id)
-    if peer is None:
-        return api_error("Bad Request: chat not found")
-    if peer.type is not PeerType.USER:
-        return api_error("Bad Request: only private chats are supported")
+    peer = await _require_writable_peer(bot_user, chat_id)
+    if isinstance(peer, dict):
+        return peer
 
     uploaded = pick_uploaded_file(params, field_name)
     file_ref = params.get(field_name) if uploaded is None else None
@@ -311,11 +304,9 @@ async def _edit_message_text(bot_user: User, params: dict[str, Any]) -> dict[str
     if text is None:
         return api_error("Bad Request: text is required")
 
-    peer = await _resolve_chat_peer(bot_user, chat_id)
+    peer = await resolve_bot_api_peer(bot_user, chat_id)
     if peer is None:
         return api_error("Bad Request: chat not found")
-    if peer.type is not PeerType.USER:
-        return api_error("Bad Request: only private chats are supported")
 
     message = await MessageRef.get_or_none(id=int(message_id), peer=peer).select_related("content")
     if message is None or message.content.author_id != bot_user.id:
@@ -349,7 +340,7 @@ async def _edit_message_caption(bot_user: User, params: dict[str, Any]) -> dict[
     if message_id is None:
         return api_error("Bad Request: message_id is required")
 
-    peer = await _resolve_chat_peer(bot_user, chat_id)
+    peer = await resolve_bot_api_peer(bot_user, chat_id)
     if peer is None:
         return api_error("Bad Request: chat not found")
 
@@ -387,7 +378,7 @@ async def _edit_message_reply_markup(bot_user: User, params: dict[str, Any]) -> 
     if message_id is None:
         return api_error("Bad Request: message_id is required")
 
-    peer = await _resolve_chat_peer(bot_user, chat_id)
+    peer = await resolve_bot_api_peer(bot_user, chat_id)
     if peer is None:
         return api_error("Bad Request: chat not found")
 
@@ -420,11 +411,9 @@ async def _delete_message(bot_user: User, params: dict[str, Any]) -> dict[str, A
     if message_id is None:
         return api_error("Bad Request: message_id is required")
 
-    peer = await _resolve_chat_peer(bot_user, chat_id)
+    peer = await resolve_bot_api_peer(bot_user, chat_id)
     if peer is None:
         return api_error("Bad Request: chat not found")
-    if peer.type is not PeerType.USER:
-        return api_error("Bad Request: only private chats are supported")
 
     message = await MessageRef.get_or_none(id=int(message_id), peer=peer)
     if message is None:
@@ -451,12 +440,12 @@ async def _forward_message(bot_user: User, params: dict[str, Any]) -> dict[str, 
     if chat_id is None or message_id is None:
         return api_error("Bad Request: chat_id and message_id are required")
 
-    to_peer = await _resolve_chat_peer(bot_user, chat_id)
-    from_peer = await _resolve_chat_peer(bot_user, from_chat_id)
+    to_peer = await resolve_bot_api_peer(bot_user, chat_id)
+    from_peer = await resolve_bot_api_peer(bot_user, from_chat_id)
     if to_peer is None or from_peer is None:
         return api_error("Bad Request: chat not found")
-    if to_peer.type is not PeerType.USER or from_peer.type is not PeerType.USER:
-        return api_error("Bad Request: only private chats are supported")
+    if not await peer_is_writable(bot_user, to_peer):
+        return api_error("Bad Request: bot is not allowed to send messages in this chat", error_code=403)
 
     src_msg = await MessageRef.get_or_none(id=int(message_id), peer=from_peer).select_related(
         "content", "content__media", "content__media__file",
@@ -510,13 +499,11 @@ async def _get_chat(bot_user: User, params: dict[str, Any]) -> dict[str, Any]:
     if chat_id is None:
         return api_error("Bad Request: chat_id is required")
 
-    peer = await _resolve_chat_peer(bot_user, chat_id)
+    peer = await resolve_bot_api_peer(bot_user, chat_id)
     if peer is None:
         return api_error("Bad Request: chat not found")
-    if peer.type is not PeerType.USER:
-        return api_error("Bad Request: only private chats are supported")
 
-    return api_ok(await private_chat_to_bot_api(peer))
+    return api_ok(await peer_to_bot_api(peer))
 
 
 async def _get_file(params: dict[str, Any]) -> dict[str, Any]:
@@ -543,23 +530,49 @@ async def _send_chat_action(bot_user: User, params: dict[str, Any]) -> dict[str,
     if action is None:
         return api_error("Bad Request: invalid action")
 
-    peer = await _resolve_chat_peer(bot_user, chat_id)
+    peer = await resolve_bot_api_peer(bot_user, chat_id)
     if peer is None:
         return api_error("Bad Request: chat not found")
-    if peer.type is not PeerType.USER:
-        return api_error("Bad Request: only private chats are supported")
 
-    opposite_peers = await peer.get_opposite()
-    if not opposite_peers:
-        return api_ok(True)
-
-    await SessionManager.send(
-        upd.UpdatesWithDefaults(
-            updates=[UpdateUserTyping(user_id=bot_user.id, action=action)],
-            users=[await bot_user.to_tl()],
-        ),
-        user_id=[other.owner_id for other in opposite_peers],
-    )
+    if peer.type is PeerType.USER:
+        opposite_peers = await peer.get_opposite()
+        if not opposite_peers:
+            return api_ok(True)
+        await SessionManager.send(
+            upd.UpdatesWithDefaults(
+                updates=[UpdateUserTyping(user_id=bot_user.id, action=action)],
+                users=[await bot_user.to_tl()],
+            ),
+            user_id=[other.owner_id for other in opposite_peers],
+        )
+    elif peer.type is PeerType.CHAT:
+        await peer.fetch_related("chat")
+        await SessionManager.send(
+            upd.UpdatesWithDefaults(
+                updates=[UpdateChatUserTyping(
+                    chat_id=peer.chat.make_id(),
+                    from_id=bot_user.to_tl_peer(),
+                    action=action,
+                )],
+                users=[await bot_user.to_tl()],
+                chats=[await peer.chat.to_tl()],
+            ),
+            user_id=await ChatParticipant.filter(chat_id=peer.chat_id, left=False).values_list("user_id", flat=True),
+        )
+    elif peer.type is PeerType.CHANNEL:
+        await peer.fetch_related("channel")
+        await SessionManager.send(
+            upd.UpdatesWithDefaults(
+                updates=[UpdateChannelUserTyping(
+                    channel_id=peer.channel.make_id(),
+                    from_id=bot_user.to_tl_peer(),
+                    action=action,
+                )],
+                users=[await bot_user.to_tl()],
+                chats=[await peer.channel.to_tl()],
+            ),
+            user_id=await ChatParticipant.filter(channel_id=peer.channel_id, left=False).values_list("user_id", flat=True),
+        )
     return api_ok(True)
 
 

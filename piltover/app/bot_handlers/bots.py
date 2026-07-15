@@ -115,7 +115,7 @@ async def process_message_to_bot(peer: Peer, message: MessageRef) -> MessageRef 
         from piltover.app.bot_handlers.adminbot.utils import home_keyboard, send_bot_message
         return await send_bot_message(
             peer,
-            "Unknown command. Send /start to open the admin panel.",
+            "Неизвестная команда. Отправьте /start, чтобы открыть админ-панель.",
             home_keyboard(),
         )
     return result

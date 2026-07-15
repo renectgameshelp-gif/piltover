@@ -28,8 +28,8 @@ from piltover.tl import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMa
 
 async def page_home(peer: Peer, menu: MessageRef) -> MessageRef:
     text = (
-        "🛡 Admin Panel\n\n"
-        "Server administration. Choose a category below."
+        "🛡 Админ-панель\n\n"
+        "Администрирование сервера. Выберите категорию ниже."
     )
     return await edit_bot_message(menu, peer, text, home_keyboard())
 
@@ -51,8 +51,8 @@ async def _stars_amount(user_id: int) -> int:
 
 def _user_nav_row(list_key: str) -> KeyboardButtonRow:
     return KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="« Users", data=back_list_data(list_key)),
-        KeyboardButtonCallback(text="« Main menu", data=HOME),
+        KeyboardButtonCallback(text="« Пользователи", data=back_list_data(list_key)),
+        KeyboardButtonCallback(text="« Главное меню", data=HOME),
     ])
 
 
@@ -73,26 +73,26 @@ async def page_users(peer: Peer, page: int, menu: MessageRef, *, show_system: bo
     chunk = users[page * PAGE_SIZE:(page + 1) * PAGE_SIZE] if total else []
     usernames = await _usernames_for_users(chunk)
 
-    scope = "all users" if show_system else "regular users"
+    scope = "все пользователи" if show_system else "обычные пользователи"
     items = [
         (user_label(user, username=usernames.get(user.id)), user_link(user.id, list_key))
         for user in chunk
     ]
-    text = f"👥 Users ({total}, {scope}). Tap to manage:"
+    text = f"👥 Пользователи ({total}, {scope}). Нажмите для управления:"
     page_prefix = b"adm:users:sys" if show_system else b"adm:users"
     keyboard = list_keyboard(
         items=items, page=page, total_pages=total_pages, page_prefix=page_prefix,
     )
-    toggle_label = "✅ Show system" if show_system else "☑️ Show system"
+    toggle_label = "✅ Показать системные" if show_system else "☑️ Показать системные"
     keyboard.rows.insert(0, KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="🔍 Find", data=b"adm:find:user"),
+        KeyboardButtonCallback(text="🔍 Найти", data=b"adm:find:user"),
         KeyboardButtonCallback(text=toggle_label, data=users_list_callback(page, show_system=not show_system)),
     ]))
     keyboard.rows.insert(0, KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="🗑 Deleted accounts", data=b"adm:del:0"),
+        KeyboardButtonCallback(text="🗑 Удалённые аккаунты", data=b"adm:del:0"),
     ]))
     if total == 0:
-        text = f"👥 No users ({scope})."
+        text = f"👥 Нет пользователей ({scope})."
     return await edit_bot_message(menu, peer, text, keyboard)
 
 
@@ -100,7 +100,7 @@ async def page_admins(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
     users = list(await User.filter(admin=True, bot=False, deleted=False).order_by("-id"))
     total = len(users)
     if total == 0:
-        return await edit_bot_message(menu, peer, "No admins found.", list_keyboard(
+        return await edit_bot_message(menu, peer, "Администраторы не найдены.", list_keyboard(
             items=[], page=0, total_pages=1, page_prefix=b"adm:admins", back_data=HOME,
         ))
 
@@ -114,7 +114,7 @@ async def page_admins(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
         (user_label(user, username=usernames.get(user.id)), user_link(user.id, list_key))
         for user in chunk
     ]
-    text = f"Admins ({total}). Tap to manage:"
+    text = f"Администраторы ({total}). Нажмите для управления:"
     keyboard = list_keyboard(items=items, page=page, total_pages=total_pages, page_prefix=b"adm:admins")
     return await edit_bot_message(menu, peer, text, keyboard)
 
@@ -123,7 +123,7 @@ async def page_channels(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
     channels = list(await Channel.filter(deleted=False).order_by("-id"))
     total = len(channels)
     if total == 0:
-        return await edit_bot_message(menu, peer, "No channels.", list_keyboard(
+        return await edit_bot_message(menu, peer, "Нет каналов.", list_keyboard(
             items=[], page=0, total_pages=1, page_prefix=b"adm:channels",
         ))
 
@@ -134,15 +134,15 @@ async def page_channels(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
 
     items: list[tuple[str, bytes]] = []
     for channel in chunk:
-        kind = "channel" if channel.channel else "supergroup"
+        kind = "канал" if channel.channel else "супергруппа"
         badge = " ✓" if channel.verified else ""
         label = f"[{kind}] {channel.name}{badge}"
         items.append((label[:64], f"adm:ch:{channel.id}:{list_key}".encode()))
 
-    text = f"Channels & supergroups ({total}). Tap for profile:"
+    text = f"Каналы и супергруппы ({total}). Нажмите для профиля:"
     keyboard = list_keyboard(items=items, page=page, total_pages=total_pages, page_prefix=b"adm:channels")
     keyboard.rows.insert(0, KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="🔍 Find channel", data=b"adm:find:ch"),
+        KeyboardButtonCallback(text="🔍 Найти канал", data=b"adm:find:ch"),
     ]))
     return await edit_bot_message(menu, peer, text, keyboard)
 
@@ -151,7 +151,7 @@ async def page_groups(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
     chats = list(await Chat.filter(deleted=False, migrated=False).order_by("-id"))
     total = len(chats)
     if total == 0:
-        return await edit_bot_message(menu, peer, "No basic groups.", list_keyboard(
+        return await edit_bot_message(menu, peer, "Нет обычных групп.", list_keyboard(
             items=[], page=0, total_pages=1, page_prefix=b"adm:groups",
         ))
 
@@ -163,13 +163,13 @@ async def page_groups(peer: Peer, page: int, menu: MessageRef) -> MessageRef:
     items: list[tuple[str, bytes]] = []
     for chat in chunk:
         badge = " ✓" if chat.verified else ""
-        label = f"[group] {chat.name}{badge}"
+        label = f"[группа] {chat.name}{badge}"
         items.append((label[:64], f"adm:gr:{chat.id}:{list_key}".encode()))
 
-    text = f"Basic groups ({total}). Tap for profile:"
+    text = f"Обычные группы ({total}). Нажмите для профиля:"
     keyboard = list_keyboard(items=items, page=page, total_pages=total_pages, page_prefix=b"adm:groups")
     keyboard.rows.insert(0, KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="🔍 Find group", data=b"adm:find:gr"),
+        KeyboardButtonCallback(text="🔍 Найти группу", data=b"adm:find:gr"),
     ]))
     return await edit_bot_message(menu, peer, text, keyboard)
 
@@ -188,17 +188,17 @@ async def page_stats(peer: Peer, menu: MessageRef) -> MessageRef:
     pending_reports = await AdminReport.filter(reviewed=False).count()
 
     text = (
-        "📊 Server statistics\n\n"
-        f"Users: {users}\n"
-        f"Bots: {bots}\n"
-        f"Admins: {admins}\n"
-        f"Deleted accounts: {deleted_accounts}\n"
-        f"Verified users: {verified_users}\n"
-        f"Spam blocked: {spam_blocked}\n"
-        f"Pending reports: {pending_reports}\n"
-        f"Channels: {channels}\n"
-        f"Supergroups: {supergroups}\n"
-        f"Basic groups: {groups}"
+        "📊 Статистика сервера\n\n"
+        f"Пользователи: {users}\n"
+        f"Боты: {bots}\n"
+        f"Администраторы: {admins}\n"
+        f"Удалённые аккаунты: {deleted_accounts}\n"
+        f"Верифицированные: {verified_users}\n"
+        f"Заблокированы за спам: {spam_blocked}\n"
+        f"Ожидающие жалобы: {pending_reports}\n"
+        f"Каналы: {channels}\n"
+        f"Супергруппы: {supergroups}\n"
+        f"Обычные группы: {groups}"
     )
     keyboard = ReplyInlineMarkup(rows=[back_home_row()])
     return await edit_bot_message(menu, peer, text, keyboard)
@@ -215,8 +215,8 @@ async def page_user(
     if user is None:
         markup = ReplyInlineMarkup(rows=[back_home_row()])
         if overlay:
-            return await push_bot_message(peer, "User not found.", markup)
-        return await edit_bot_message(menu, peer, "User not found.", markup)
+            return await push_bot_message(peer, "Пользователь не найден.", markup)
+        return await edit_bot_message(menu, peer, "Пользователь не найден.", markup)
 
     username = await user.get_raw_username()
     stars = await _stars_amount(user.id)
@@ -228,62 +228,62 @@ async def page_user(
         f"ID: {user.id}",
     ]
     if user.system:
-        lines.append("Type: service account ⚙")
+        lines.append("Тип: системный аккаунт ⚙")
     if username:
-        lines.append(f"Username: @{username}")
+        lines.append(f"Имя пользователя: @{username}")
     if user.phone_number:
-        lines.append(f"Phone: {user.phone_number}")
-    lines.append(f"Admin: {'yes' if user.admin else 'no'}")
-    lines.append(f"Verified: {'yes ✓' if user.verified else 'no'}")
+        lines.append(f"Телефон: {user.phone_number}")
+    lines.append(f"Админ: {'да' if user.admin else 'нет'}")
+    lines.append(f"Верифицирован: {'да ✓' if user.verified else 'нет'}")
     if not user.system:
-        lines.append(f"Spam blocked: {'yes' if user.spam_blocked else 'no'}")
-        lines.append(f"Stars: ⭐ {stars}")
-    lines.append(f"Sessions: {len(sessions)}")
+        lines.append(f"Заблокирован за спам: {'да' if user.spam_blocked else 'нет'}")
+        lines.append(f"Звёзды: ⭐ {stars}")
+    lines.append(f"Сессии: {len(sessions)}")
     if not user.system:
-        lines.append(f"Admin memberships: {len(memberships)}")
+        lines.append(f"Админские членства: {len(memberships)}")
 
     rows: list[KeyboardButtonRow] = []
     if not user.system:
         if user.admin:
             rows.append(KeyboardButtonRow(buttons=[
-                KeyboardButtonCallback(text="Revoke admin", data=user_action("unadmin", user.id, list_key)),
+                KeyboardButtonCallback(text="Отозвать админа", data=user_action("unadmin", user.id, list_key)),
             ]))
         else:
             rows.append(KeyboardButtonRow(buttons=[
-                KeyboardButtonCallback(text="Grant admin", data=user_action("admin", user.id, list_key)),
+                KeyboardButtonCallback(text="Выдать админа", data=user_action("admin", user.id, list_key)),
             ]))
 
     if user.verified:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Remove checkmark", data=user_action("unverify", user.id, list_key)),
+            KeyboardButtonCallback(text="Снять галочку", data=user_action("unverify", user.id, list_key)),
         ]))
     else:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Grant checkmark", data=user_action("verify", user.id, list_key)),
+            KeyboardButtonCallback(text="Выдать галочку", data=user_action("verify", user.id, list_key)),
         ]))
 
     if not user.system:
         if user.spam_blocked:
             rows.append(KeyboardButtonRow(buttons=[
-                KeyboardButtonCallback(text="Remove spam block", data=user_action("unspam", user.id, list_key)),
+                KeyboardButtonCallback(text="Снять блокировку за спам", data=user_action("unspam", user.id, list_key)),
             ]))
         else:
             rows.append(KeyboardButtonRow(buttons=[
-                KeyboardButtonCallback(text="Apply spam block", data=user_action("spam", user.id, list_key)),
+                KeyboardButtonCallback(text="Заблокировать за спам", data=user_action("spam", user.id, list_key)),
             ]))
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="⭐ Stars", data=f"adm:user:stars:{user.id}:{list_key}".encode()),
-            KeyboardButtonCallback(text="📱 Sessions", data=f"adm:user:sess:{user.id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="⭐ Звёзды", data=f"adm:user:stars:{user.id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="📱 Сессии", data=f"adm:user:sess:{user.id}:{list_key}".encode()),
         ]))
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="📋 Memberships", data=f"adm:user:mem:{user.id}:0:{list_key}".encode()),
+            KeyboardButtonCallback(text="📋 Членства", data=f"adm:user:mem:{user.id}:0:{list_key}".encode()),
         ]))
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="🗑 Delete account", data=user_action("deluser", user.id, list_key)),
+            KeyboardButtonCallback(text="🗑 Удалить аккаунт", data=user_action("deluser", user.id, list_key)),
         ]))
     else:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="📱 Sessions", data=f"adm:user:sess:{user.id}:{list_key}".encode()),
+            KeyboardButtonCallback(text="📱 Сессии", data=f"adm:user:sess:{user.id}:{list_key}".encode()),
         ]))
     if overlay:
         rows.append(hide_row())
@@ -299,10 +299,10 @@ async def page_user(
 async def page_user_stars(peer: Peer, user_id: int, menu: MessageRef, *, list_key: str = "u0") -> MessageRef:
     user = await _get_user_profile(user_id)
     if user is None:
-        return await edit_bot_message(menu, peer, "User not found.", ReplyInlineMarkup(rows=[back_home_row()]))
+        return await edit_bot_message(menu, peer, "Пользователь не найден.", ReplyInlineMarkup(rows=[back_home_row()]))
 
     stars = await _stars_amount(user.id)
-    text = f"⭐ Stars for {user.first_name}\n\nCurrent balance: {stars}"
+    text = f"⭐ Звёзды для {user.first_name}\n\nТекущий баланс: {stars}"
 
     rows = [
         KeyboardButtonRow(buttons=[
@@ -311,15 +311,15 @@ async def page_user_stars(peer: Peer, user_id: int, menu: MessageRef, *, list_ke
             KeyboardButtonCallback(text="+500", data=stars_action("add", user.id, 500, list_key)),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Set 0", data=stars_action("set", user.id, 0, list_key)),
-            KeyboardButtonCallback(text="Set 100", data=stars_action("set", user.id, 100, list_key)),
-            KeyboardButtonCallback(text="Set 1000", data=stars_action("set", user.id, 1000, list_key)),
+            KeyboardButtonCallback(text="Установить 0", data=stars_action("set", user.id, 0, list_key)),
+            KeyboardButtonCallback(text="Установить 100", data=stars_action("set", user.id, 100, list_key)),
+            KeyboardButtonCallback(text="Установить 1000", data=stars_action("set", user.id, 1000, list_key)),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Custom amount", data=stars_action("custom", user.id, 0, list_key)),
+            KeyboardButtonCallback(text="Другая сумма", data=stars_action("custom", user.id, 0, list_key)),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="« Back to user", data=user_link(user.id, list_key)),
+            KeyboardButtonCallback(text="« К пользователю", data=user_link(user.id, list_key)),
         ]),
     ]
     return await edit_bot_message(menu, peer, text, ReplyInlineMarkup(rows=rows))
@@ -328,12 +328,12 @@ async def page_user_stars(peer: Peer, user_id: int, menu: MessageRef, *, list_ke
 async def page_user_sessions(peer: Peer, user_id: int, menu: MessageRef, *, list_key: str = "u0") -> MessageRef:
     user = await _get_user_profile(user_id)
     if user is None:
-        return await edit_bot_message(menu, peer, "User not found.", ReplyInlineMarkup(rows=[back_home_row()]))
+        return await edit_bot_message(menu, peer, "Пользователь не найден.", ReplyInlineMarkup(rows=[back_home_row()]))
 
     sessions = await get_user_sessions(user.id)
-    lines = [f"📱 Sessions for {user.first_name} ({len(sessions)})", ""]
+    lines = [f"📱 Сессии для {user.first_name} ({len(sessions)})", ""]
     if not sessions:
-        lines.append("No active sessions.")
+        lines.append("Нет активных сессий.")
     else:
         for idx, session in enumerate(sessions[:10], start=1):
             lines.append(
@@ -342,15 +342,15 @@ async def page_user_sessions(peer: Peer, user_id: int, menu: MessageRef, *, list
                 f"   IP {session.ip}"
             )
         if len(sessions) > 10:
-            lines.append(f"... and {len(sessions) - 10} more")
+            lines.append(f"... и ещё {len(sessions) - 10}")
 
     rows: list[KeyboardButtonRow] = []
     if sessions:
         rows.append(KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="Kick all sessions", data=user_action("kick", user.id, list_key)),
+            KeyboardButtonCallback(text="Отключить все сессии", data=user_action("kick", user.id, list_key)),
         ]))
     rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="« Back to user", data=user_link(user.id, list_key)),
+        KeyboardButtonCallback(text="« К пользователю", data=user_link(user.id, list_key)),
     ]))
     return await edit_bot_message(menu, peer, "\n".join(lines), ReplyInlineMarkup(rows=rows))
 
@@ -360,7 +360,7 @@ async def page_user_memberships(
 ) -> MessageRef:
     user = await _get_user_profile(user_id)
     if user is None:
-        return await edit_bot_message(menu, peer, "User not found.", ReplyInlineMarkup(rows=[back_home_row()]))
+        return await edit_bot_message(menu, peer, "Пользователь не найден.", ReplyInlineMarkup(rows=[back_home_row()]))
 
     memberships = await get_user_memberships(user.id)
     total = len(memberships)
@@ -368,9 +368,9 @@ async def page_user_memberships(
     page = max(0, min(page, total_pages - 1))
     chunk = memberships[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
 
-    lines = [f"📋 Memberships for {user.first_name} ({total})", ""]
+    lines = [f"📋 Членства для {user.first_name} ({total})", ""]
     if not chunk:
-        lines.append("No admin groups, channels, or owned bots.")
+        lines.append("Нет админских групп, каналов или принадлежащих ботов.")
     else:
         for item in chunk:
             lines.append(f"[{item.kind}/{item.role}] {item.title} (id {item.entity_id})")
@@ -379,16 +379,16 @@ async def page_user_memberships(
     nav: list[KeyboardButtonCallback] = []
     if page > 0:
         nav.append(KeyboardButtonCallback(
-            text="« Prev", data=f"adm:user:mem:{user.id}:{page - 1}:{list_key}".encode(),
+            text="« Назад", data=f"adm:user:mem:{user.id}:{page - 1}:{list_key}".encode(),
         ))
     if page + 1 < total_pages:
         nav.append(KeyboardButtonCallback(
-            text="Next »", data=f"adm:user:mem:{user.id}:{page + 1}:{list_key}".encode(),
+            text="Вперёд »", data=f"adm:user:mem:{user.id}:{page + 1}:{list_key}".encode(),
         ))
     if nav:
         rows.append(KeyboardButtonRow(buttons=nav))
 
     rows.append(KeyboardButtonRow(buttons=[
-        KeyboardButtonCallback(text="« Back to user", data=user_link(user.id, list_key)),
+        KeyboardButtonCallback(text="« К пользователю", data=user_link(user.id, list_key)),
     ]))
     return await edit_bot_message(menu, peer, "\n".join(lines), ReplyInlineMarkup(rows=rows))

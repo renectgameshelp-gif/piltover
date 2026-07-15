@@ -11,7 +11,11 @@ from piltover.db.models import Peer, Bot, BotInfo, BotFatherUserState, UserPhoto
 from piltover.db.models.bot import bot_gen_token
 from piltover.tl import ReplyInlineMarkup, KeyboardButtonRow, KeyboardButtonCallback
 from piltover.tl.types.internal_botfather import BotfatherStateEditbot
+from piltover.app.bot_handlers.botfather.delete_bot import handle_delete_bot_callback, show_owned_bot_card
+from piltover.app.bot_handlers.botfather.settings import handle_bot_settings_callback
 from piltover.tl.types.messages import BotCallbackAnswer
+
+_EMPTY_CLICK = BotCallbackAnswer(cache_time=0)
 
 __text_bot_selected = FormatableTextWithEntities(
     "Here it is: {name} <u>@{username}</u>.\nWhat do you want to do with the bot?"
@@ -92,44 +96,7 @@ async def botfather_callback_query_handler(peer: Peer, message: MessageRef, data
             bot_id = int(data[5:])
         except ValueError:
             return None
-
-        bot_info = await User.get_or_none(
-            id=bot_id, bot_bot__owner_id=peer.owner_id
-        ).select_related("username").values_list("first_name", "username__username")
-        if bot_info is None:
-            return None
-
-        bot_first_name, bot_username = bot_info
-
-        text, entities = __text_bot_selected.format(name=bot_first_name, username=bot_username)
-        apply_message_edit(
-            message.content,
-            message=text,
-            entities=entities,
-            reply_markup=ReplyInlineMarkup(rows=[
-                KeyboardButtonRow(buttons=[
-                    KeyboardButtonCallback(text=f"API Token", data=f"bots-token/{bot_id}".encode("latin1")),
-                    KeyboardButtonCallback(text=f"Edit Bot", data=f"bots-edit/{bot_id}".encode("latin1")),
-                ]),
-                KeyboardButtonRow(buttons=[
-                    KeyboardButtonCallback(text=f"TODO Bot Settings", data=f"bots-settings/{bot_id}".encode("latin1")),
-                    KeyboardButtonCallback(text=f"TODO Payments", data=f"bots-payments/{bot_id}".encode("latin1")),
-                ]),
-                KeyboardButtonRow(buttons=[
-                    KeyboardButtonCallback(text=f"TODO Transfer Ownership", data=f"bots-transfer/{bot_id}".encode("latin1")),
-                    KeyboardButtonCallback(text=f"TODO Delete Bot", data=f"bots-delete/{bot_id}".encode("latin1")),
-                ]),
-                KeyboardButtonRow(buttons=[
-                    KeyboardButtonCallback(text=f"<- Back to Bot List", data=f"mybots".encode("latin1")),
-                ]),
-            ]),
-        )
-
-        async with in_transaction():
-            await message.content.save(update_fields=["message", "entities", "reply_markup", "version"])
-        await upd.edit_message(peer.owner_id, {peer: message})
-
-        return BotCallbackAnswer(cache_time=0)
+        return await show_owned_bot_card(peer, message, bot_id)
 
     if data == b"mybots":
         rows = await get_bot_selection_inline_keyboard(peer.owner_id, 0)
@@ -389,6 +356,17 @@ async def botfather_callback_query_handler(peer: Peer, message: MessageRef, data
         await upd.send_message(None, {peer: new_message}, False)
 
         return BotCallbackAnswer(cache_time=0)
+
+    delete_answer = await handle_delete_bot_callback(peer, message, data)
+    if delete_answer is not None:
+        return delete_answer
+
+    settings_answer = await handle_bot_settings_callback(peer, message, data)
+    if settings_answer is not None:
+        return settings_answer
+
+    if data.startswith(b"bots-payments/") or data.startswith(b"bots-transfer/"):
+        return _EMPTY_CLICK
 
     if data.startswith(b"bots-edit-commands/"):
         try:

@@ -230,6 +230,7 @@ async def test_get_stars_status_includes_recent_history(client_with_auth) -> Non
     assert status.history is not None
     assert len(status.history) == 1
     assert status.history[0].stars.amount == 7
+    assert status.users
 
 
 @pytest.mark.asyncio
@@ -402,7 +403,7 @@ async def test_stars_status_serializes_for_layer_201(client_with_auth) -> None:
     )
     assert status.history is not None
     assert len(status.history) == 1
-    assert status.users == []
+    assert status.users
     assert status.chats == []
 
     ctx = SerializationContext(auth_id=0, user_id=user.id, layer=201)
@@ -410,7 +411,7 @@ async def test_stars_status_serializes_for_layer_201(client_with_auth) -> None:
     parsed = TLObject.read(BytesIO(status_data))
     assert parsed.history is not None
     assert len(parsed.history) == 1
-    assert parsed.users == []
+    assert parsed.users
     assert parsed.chats == []
     assert parsed.history[0].stars.amount == 11
     assert parsed.history[0].write(ctx).startswith(b"\xb0\x9e\x65\x13")

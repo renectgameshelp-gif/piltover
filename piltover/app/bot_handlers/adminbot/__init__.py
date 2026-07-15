@@ -5,12 +5,12 @@ from piltover.db.enums import AdminBotState
 from piltover.db.models import AdminBotUserState, MessageRef, Peer
 
 _START_TEXT = (
-    "🛡 Admin Panel\n\n"
-    "Server administration. Choose a category below."
+    "🛡 Админ-панель\n\n"
+    "Управление сервером. Выберите раздел ниже."
 )
 
 _FALLBACK_TEXT = (
-    "Use the buttons below or send /start to open the admin panel."
+    "Используйте кнопки ниже или отправьте /start, чтобы открыть админ-панель."
 )
 
 
@@ -30,7 +30,7 @@ class AdminBotInteractionHandler(BotInteractionHandler[AdminBotState, AdminBotUs
             try:
                 report_id = int(args[1][len("report_"):])
             except ValueError:
-                return await send_bot_message(peer, "Invalid report link.", home_keyboard())
+                return await send_bot_message(peer, "Неверная ссылка на репорт.", home_keyboard())
             return await pages_extended.page_report(
                 peer, report_id, message, list_key="r0", overlay=True,
             )

@@ -77,10 +77,13 @@ async def build_stars_status(
     balance = await UserStarsBalance.get_or_create_for(wallet_user_id)
 
     history_tl = None
+    users: list = []
+    chats: list = []
     if history is not None:
         ucc = UsersChatsChannels()
         render_ctx = await _stars_render_ctx()
         history_tl = [tx.to_tl(ucc, render_ctx) for tx in history]
+        users, chats, _ = await ucc.resolve()
 
     return StarsStatus(
         balance=balance.to_stars_amount(),
@@ -88,8 +91,8 @@ async def build_stars_status(
         next_offset=next_offset,
         subscriptions=subscriptions,
         subscriptions_next_offset=subscriptions_next_offset,
-        chats=[],
-        users=[],
+        chats=chats,
+        users=users,
     )
 
 

@@ -57,26 +57,29 @@ def user_label(user: User, *, username: str | None = None) -> str:
 
 def home_keyboard() -> ReplyInlineMarkup:
     return ReplyInlineMarkup(rows=[
-        KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="👥 Users", data=b"adm:users:0")]),
+        KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="👥 Пользователи", data=b"adm:users:0")]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="🔍 Find user", data=b"adm:find:user"),
-            KeyboardButtonCallback(text="🗑 Deleted", data=b"adm:del:0"),
+            KeyboardButtonCallback(text="🔍 Найти", data=b"adm:find:user"),
+            KeyboardButtonCallback(text="🗑 Удалённые", data=b"adm:del:0"),
         ]),
-        KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="🛡 Admins", data=b"adm:admins:0")]),
+        KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="🛡 Админы", data=b"adm:admins:0")]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="📢 Channels", data=b"adm:channels:0"),
-            KeyboardButtonCallback(text="💬 Groups", data=b"adm:groups:0"),
+            KeyboardButtonCallback(text="📢 Каналы", data=b"adm:channels:0"),
+            KeyboardButtonCallback(text="💬 Группы", data=b"adm:groups:0"),
         ]),
         KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(text="🤖 Bots", data=b"adm:bots:0"),
-            KeyboardButtonCallback(text="📩 Reports", data=b"adm:reports:0"),
+            KeyboardButtonCallback(text="🤖 Боты", data=b"adm:bots:0"),
+            KeyboardButtonCallback(text="📩 Репорты", data=b"adm:reports:0"),
         ]),
-        KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="📊 Statistics", data=b"adm:stats")]),
+        KeyboardButtonRow(buttons=[
+            KeyboardButtonCallback(text="📣 Сервер", data=b"adm:server"),
+            KeyboardButtonCallback(text="📊 Статистика", data=b"adm:stats"),
+        ]),
     ])
 
 
 def back_home_row() -> KeyboardButtonRow:
-    return KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="« Main menu", data=HOME)])
+    return KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="« Главное меню", data=HOME)])
 
 
 def list_keyboard(
@@ -93,13 +96,13 @@ def list_keyboard(
 
     nav: list[KeyboardButtonCallback] = []
     if page > 0:
-        nav.append(KeyboardButtonCallback(text="« Prev", data=f"{page_prefix.decode()}:{page - 1}".encode()))
+        nav.append(KeyboardButtonCallback(text="« Назад", data=f"{page_prefix.decode()}:{page - 1}".encode()))
     if page + 1 < total_pages:
-        nav.append(KeyboardButtonCallback(text="Next »", data=f"{page_prefix.decode()}:{page + 1}".encode()))
+        nav.append(KeyboardButtonCallback(text="Вперёд »", data=f"{page_prefix.decode()}:{page + 1}".encode()))
     if nav:
         rows.append(KeyboardButtonRow(buttons=nav))
 
-    rows.append(KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="« Back", data=back_data)]))
+    rows.append(KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="« Назад", data=back_data)]))
     return ReplyInlineMarkup(rows=rows)
 
 
@@ -125,7 +128,7 @@ async def push_bot_message(
 
 
 def hide_row() -> KeyboardButtonRow:
-    return KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="Hide", data=HIDE)])
+    return KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="Скрыть", data=HIDE)])
 
 
 async def hide_bot_message(peer: Peer, message: MessageRef) -> None:

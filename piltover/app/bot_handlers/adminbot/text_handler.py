@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import piltover.app.utils.updates_manager as upd
-from piltover.app.bot_handlers.adminbot import pages, pages_extended
+from piltover.app.bot_handlers.adminbot import actions_server, pages, pages_extended
 from piltover.app.bot_handlers.adminbot.callback_data import decode_stars_wait_data, LIST_KEY_DEFAULT
 from piltover.app.bot_handlers.adminbot.utils import send_bot_message
 from piltover.app.bot_handlers.interaction_handler import BotInteractionHandler
@@ -52,25 +52,48 @@ class AdminBotTextHandler(BotInteractionHandler[AdminBotState, AdminBotUserState
             .delete_state()
             .register()
         )
+        (
+            self.text()
+            .set_send_message_func(send_bot_message)
+            .when(state=AdminBotState.WAIT_SYSTEM_TARGET)
+            .do(self._system_target)
+            .register()
+        )
+        (
+            self.text()
+            .set_send_message_func(send_bot_message)
+            .when(state=AdminBotState.WAIT_SYSTEM_TEXT)
+            .do(self._system_text)
+            .delete_state()
+            .register()
+        )
+
+    @staticmethod
+    async def _system_target(peer: Peer, message: MessageRef, state: AdminBotUserState) -> MessageRef | None:
+        return await actions_server.handle_system_target_input(peer, message, state)
+
+    @staticmethod
+    async def _system_text(peer: Peer, message: MessageRef, state: AdminBotUserState) -> MessageRef | None:
+        return await actions_server.handle_system_text_input(peer, message, state)
 
     @staticmethod
     async def _custom_stars_amount(peer: Peer, message: MessageRef, state: AdminBotUserState) -> MessageRef:
         text = message.content.message
         if text is None:
-            return await send_bot_message(peer, "Please send a number.")
+            return await send_bot_message(peer, "Отправьте число.")
 
         try:
             amount = int(text.strip())
         except ValueError:
-            return await send_bot_message(peer, "Invalid number. Send an integer star balance.")
+            return await send_bot_message(peer, "Неверное число. Отправьте целый баланс звёзд.")
 
         if amount < 0:
-            return await send_bot_message(peer, "Amount must be zero or positive.")
+            return await send_bot_message(peer, "Сумма должна быть нулём или больше.")
 
         target_user_id, list_key = decode_stars_wait_data(state.data)
         target = await User.get_or_none(id=target_user_id, bot=False, system=False, deleted=False)
         if target is None:
-            return await send_bot_message(peer, "Target user not found.")
+            return await send_bot_message(peer, "Целевой пользователь не найден.")
 
         try:
             balance = await set_stars_balance(
@@ -83,7 +106,7 @@ class AdminBotTextHandler(BotInteractionHandler[AdminBotState, AdminBotUserState
             return await send_bot_message(peer, exc.error_message)
 
         await upd.update_stars_balance(target_user_id, balance.to_stars_amount())
-        return await send_bot_message(peer, f"Balance set to {amount} stars for {target.first_name}.")
+        return await send_bot_message(peer, f"Баланс {amount} ⭐ для {target.first_name}.")
 
     @staticmethod
     async def _search_query(peer: Peer, message: MessageRef, state: AdminBotUserState) -> MessageRef:
@@ -107,9 +130,9 @@ class AdminBotTextHandler(BotInteractionHandler[AdminBotState, AdminBotUserState
                 elif len(matches) > 1:
                     names = ", ".join(f"{u.first_name} ({u.id})" for u in matches[:8])
                     suffix = "…" if len(matches) > 8 else ""
-                    return await send_bot_message(peer, f"Multiple matches: {names}{suffix}")
+                    return await send_bot_message(peer, f"Несколько совпадений: {names}{suffix}")
             if user is None:
-                return await send_bot_message(peer, "User not found.")
+                return await send_bot_message(peer, "Пользователь не найден.")
             if user.deleted:
                 return await pages_extended.page_deleted_user(peer, user.id, message, list_key="d0")
             return await pages.page_user(peer, user.id, message, list_key="u0", overlay=True)
@@ -117,7 +140,7 @@ class AdminBotTextHandler(BotInteractionHandler[AdminBotState, AdminBotUserState
         if filters.kind == "ch":
             channel = await resolve_channel_query(query, channel_kind=filters.channel_kind)
             if channel is None:
-                return await send_bot_message(peer, "Channel not found.")
+                return await send_bot_message(peer, "Канал не найден.")
             return await pages_extended.page_channel(
                 peer, channel.id, message, list_key="c0", new_message=True,
             )
@@ -125,7 +148,7 @@ class AdminBotTextHandler(BotInteractionHandler[AdminBotState, AdminBotUserState
         if filters.kind == "gr":
             chat = await resolve_chat_query(query)
             if chat is None:
-                return await send_bot_message(peer, "Group not found.")
+                return await send_bot_message(peer, "Группа не найдена.")
             return await pages_extended.page_group(
                 peer, chat.id, message, list_key="g0", new_message=True,
             )
@@ -133,10 +156,10 @@ class AdminBotTextHandler(BotInteractionHandler[AdminBotState, AdminBotUserState
         if filters.kind == "bot":
             bot_user = await resolve_bot_query(query, include_system=filters.show_system)
             if bot_user is None:
-                return await send_bot_message(peer, "Bot not found.")
+                return await send_bot_message(peer, "Бот не найден.")
             return await pages_extended.page_bot(peer, bot_user.id, message, list_key="b0", new_message=True)
 
-        return await send_bot_message(peer, "Unknown search type.")
+        return await send_bot_message(peer, "Неизвестный тип поиска.")
 
     @staticmethod
     async def _resolve_bot_edit_menu(menu_id: int | None) -> MessageRef | None:
@@ -150,7 +173,7 @@ class AdminBotTextHandler(BotInteractionHandler[AdminBotState, AdminBotUserState
         payload = (state.data or b"").decode()
         parts = payload.split(":")
         if len(parts) < 3:
-            return await send_bot_message(peer, "Session expired.")
+            return await send_bot_message(peer, "Сессия истекла.")
 
         field, bot_id_str, list_key = parts[0], parts[1], parts[2]
         menu_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
@@ -158,9 +181,9 @@ class AdminBotTextHandler(BotInteractionHandler[AdminBotState, AdminBotUserState
         menu_ref = await AdminBotTextHandler._resolve_bot_edit_menu(menu_id)
         bot_user = await User.get_or_none(id=bot_id, bot=True, deleted=False)
         if bot_user is None:
-            return await send_bot_message(peer, "Bot not found.")
+            return await send_bot_message(peer, "Бот не найден.")
 
-        clear = text in {"-", "—", "clear", "none", "empty"}
+        clear = text in {"-", "—", "clear", "none", "empty", "очистить", "пусто"}
         error = await apply_bot_field_value(bot_user, field, text, clear=clear)
         if error is not None:
             return await send_bot_message(peer, error)
@@ -175,37 +198,37 @@ class AdminBotTextHandler(BotInteractionHandler[AdminBotState, AdminBotUserState
     async def _transfer_owner(peer: Peer, message: MessageRef, state: AdminBotUserState) -> MessageRef:
         text = (message.content.message or "").strip()
         if not text.isdigit():
-            return await send_bot_message(peer, "Send numeric user ID.")
+            return await send_bot_message(peer, "Отправьте числовой id пользователя.")
 
         new_owner_id = int(text)
         payload = (state.data or b"").decode()
         parts = payload.split(":")
         if len(parts) < 3:
-            return await send_bot_message(peer, "Session expired.")
+            return await send_bot_message(peer, "Сессия истекла.")
 
         kind, entity_id_str, list_key = parts[0], parts[1], parts[2]
         entity_id = int(entity_id_str)
 
         target = await User.get_or_none(id=new_owner_id, deleted=False, bot=False)
         if target is None:
-            return await send_bot_message(peer, "Target user not found.")
+            return await send_bot_message(peer, "Целевой пользователь не найден.")
 
         try:
             if kind == "ch":
                 from piltover.db.models import Channel
                 channel = await Channel.get_or_none(id=entity_id, deleted=False)
                 if channel is None:
-                    return await send_bot_message(peer, "Channel not found.")
+                    return await send_bot_message(peer, "Канал не найден.")
                 await transfer_channel_owner(channel, new_owner_id)
                 return await pages_extended.page_channel(peer, entity_id, message, list_key=list_key)
             if kind == "gr":
                 from piltover.db.models import Chat
                 chat = await Chat.get_or_none(id=entity_id, deleted=False)
                 if chat is None:
-                    return await send_bot_message(peer, "Group not found.")
+                    return await send_bot_message(peer, "Группа не найдена.")
                 await transfer_chat_owner(chat, new_owner_id)
                 return await pages_extended.page_group(peer, entity_id, message, list_key=list_key)
         except ValueError:
-            return await send_bot_message(peer, "Transfer failed — user must be a member.")
+            return await send_bot_message(peer, "Не удалось передать — пользователь должен быть участником.")
 
-        return await send_bot_message(peer, "Unknown entity.")
+        return await send_bot_message(peer, "Неизвестная сущность.")

@@ -16,6 +16,7 @@ from piltover.db.models import BotPrecheckoutQuery, CallbackQuery, MessageRef, P
 
 _UPDATE_TYPE_KEYS = {
     "message": "message",
+    "channel_post": "channel_post",
     "callback_query": "callback_query",
     "pre_checkout_query": "pre_checkout_query",
 }
@@ -52,11 +53,21 @@ class BotApiUpdatesStore:
 
     def __init__(self) -> None:
         self._bots: dict[int, _BotUpdatesState] = {}
+        self._read_all_group_messages: set[int] = set()
 
     def _state(self, bot_id: int) -> _BotUpdatesState:
         if bot_id not in self._bots:
             self._bots[bot_id] = _BotUpdatesState()
         return self._bots[bot_id]
+
+    def can_read_all_group_messages(self, bot_id: int) -> bool:
+        return bot_id in self._read_all_group_messages
+
+    def set_can_read_all_group_messages(self, bot_id: int, enabled: bool) -> None:
+        if enabled:
+            self._read_all_group_messages.add(bot_id)
+        else:
+            self._read_all_group_messages.discard(bot_id)
 
     def has_webhook(self, bot_id: int) -> bool:
         return bool(self._state(bot_id).webhook.url)
@@ -198,10 +209,12 @@ class BotApiUpdatesStore:
         state.updates.append(update)
         self._notify_waiters(state)
 
-    async def enqueue_incoming_message(self, bot_user: User, peer: Peer, message: MessageRef) -> None:
-        await self._enqueue_update(bot_user, {
-            "message": await message_to_bot_api(bot_user, peer, message),
-        })
+    async def enqueue_incoming_message(
+            self, bot_user: User, peer: Peer, message: MessageRef, *, channel_post: bool = False,
+    ) -> None:
+        payload = await message_to_bot_api(bot_user, peer, message)
+        key = "channel_post" if channel_post else "message"
+        await self._enqueue_update(bot_user, {key: payload})
 
     async def enqueue_callback_query(self, bot_user: User, query: CallbackQuery) -> None:
         await self._enqueue_update(bot_user, {

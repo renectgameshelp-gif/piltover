@@ -28,7 +28,7 @@ async def toggle_user_admin(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
     if user is None:
-        return BotCallbackAnswer(message="User not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Пользователь не найден.", alert=True, cache_time=0)
 
     try:
         changed = await set_user_admin(user, admin)
@@ -37,9 +37,9 @@ async def toggle_user_admin(
 
     await pages.page_user(peer, user_id, menu, list_key=list_key)
     if not changed:
-        return BotCallbackAnswer(message="Already up to date.", cache_time=0)
-    action = "granted" if admin else "revoked"
-    return BotCallbackAnswer(message=f"Admin access {action}.", cache_time=0)
+        return BotCallbackAnswer(message="Уже актуально.", cache_time=0)
+    action = "выданы" if admin else "отозваны"
+    return BotCallbackAnswer(message=f"Права администратора {action}.", cache_time=0)
 
 
 async def toggle_user_verified(
@@ -47,14 +47,14 @@ async def toggle_user_verified(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, deleted=False)
     if user is None or user.bot:
-        return BotCallbackAnswer(message="User not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Пользователь не найден.", alert=True, cache_time=0)
 
     changed = await verification.set_user_verified(user, verified)
     await pages.page_user(peer, user_id, menu, list_key=list_key)
     if not changed:
-        return BotCallbackAnswer(message="Already up to date.", cache_time=0)
-    action = "granted" if verified else "removed"
-    return BotCallbackAnswer(message=f"Checkmark {action}.", cache_time=0)
+        return BotCallbackAnswer(message="Уже актуально.", cache_time=0)
+    action = "выдана" if verified else "снята"
+    return BotCallbackAnswer(message=f"Галочка {action}.", cache_time=0)
 
 
 async def toggle_user_spam_block(
@@ -62,14 +62,14 @@ async def toggle_user_spam_block(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
     if user is None:
-        return BotCallbackAnswer(message="User not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Пользователь не найден.", alert=True, cache_time=0)
 
     changed = await set_user_spam_blocked(user, blocked)
     await pages.page_user(peer, user_id, menu, list_key=list_key)
     if not changed:
-        return BotCallbackAnswer(message="Already up to date.", cache_time=0)
-    action = "applied" if blocked else "removed"
-    return BotCallbackAnswer(message=f"Spam block {action}.", cache_time=0)
+        return BotCallbackAnswer(message="Уже актуально.", cache_time=0)
+    action = "применён" if blocked else "снят"
+    return BotCallbackAnswer(message=f"Спам-блок {action}.", cache_time=0)
 
 
 async def kick_user_sessions_action(
@@ -77,13 +77,13 @@ async def kick_user_sessions_action(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
     if user is None:
-        return BotCallbackAnswer(message="User not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Пользователь не найден.", alert=True, cache_time=0)
 
     count = await kick_all_user_sessions(user.id)
     await pages.page_user_sessions(peer, user_id, menu, list_key=list_key)
     if count == 0:
-        return BotCallbackAnswer(message="No sessions to kick.", cache_time=0)
-    return BotCallbackAnswer(message=f"Kicked {count} session(s).", cache_time=0)
+        return BotCallbackAnswer(message="Нет сессий для отключения.", cache_time=0)
+    return BotCallbackAnswer(message=f"Отключено сессий: {count}.", cache_time=0)
 
 
 async def toggle_channel_verified(
@@ -91,14 +91,14 @@ async def toggle_channel_verified(
 ) -> BotCallbackAnswer:
     channel = await Channel.get_or_none(id=channel_id, deleted=False)
     if channel is None:
-        return BotCallbackAnswer(message="Channel not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Канал не найден.", alert=True, cache_time=0)
 
     changed = await verification.set_channel_verified(channel, verified)
     await pages_extended.page_channel(peer, channel_id, menu, list_key=list_key)
     if not changed:
-        return BotCallbackAnswer(message="Already up to date.", cache_time=0)
-    action = "granted" if verified else "removed"
-    return BotCallbackAnswer(message=f"Checkmark {action}.", cache_time=0)
+        return BotCallbackAnswer(message="Уже актуально.", cache_time=0)
+    action = "выдана" if verified else "снята"
+    return BotCallbackAnswer(message=f"Галочка {action}.", cache_time=0)
 
 
 async def toggle_chat_verified(
@@ -106,14 +106,14 @@ async def toggle_chat_verified(
 ) -> BotCallbackAnswer:
     chat = await Chat.get_or_none(id=chat_id, deleted=False, migrated=False)
     if chat is None:
-        return BotCallbackAnswer(message="Group not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Группа не найдена.", alert=True, cache_time=0)
 
     changed = await verification.set_chat_verified(chat, verified)
     await pages_extended.page_group(peer, chat_id, menu, list_key=list_key)
     if not changed:
-        return BotCallbackAnswer(message="Already up to date.", cache_time=0)
-    action = "granted" if verified else "removed"
-    return BotCallbackAnswer(message=f"Checkmark {action}.", cache_time=0)
+        return BotCallbackAnswer(message="Уже актуально.", cache_time=0)
+    action = "выдана" if verified else "снята"
+    return BotCallbackAnswer(message=f"Галочка {action}.", cache_time=0)
 
 
 async def grant_user_stars(
@@ -121,17 +121,17 @@ async def grant_user_stars(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
     if user is None:
-        return BotCallbackAnswer(message="User not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Пользователь не найден.", alert=True, cache_time=0)
 
     balance = await grant_stars(
         user_id,
         amount,
-        title="Admin grant",
-        description=f"Granted {amount} stars via @admin",
+        title="Начисление администратором",
+        description=f"Начислено {amount} звёзд через @admin",
     )
     await upd.update_stars_balance(user_id, balance.to_stars_amount())
     await pages.page_user_stars(peer, user_id, menu, list_key=list_key)
-    return BotCallbackAnswer(message=f"Granted {amount} stars.", cache_time=0)
+    return BotCallbackAnswer(message=f"Начислено {amount} звёзд.", cache_time=0)
 
 
 async def set_user_stars(
@@ -139,17 +139,17 @@ async def set_user_stars(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
     if user is None:
-        return BotCallbackAnswer(message="User not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Пользователь не найден.", alert=True, cache_time=0)
 
     balance = await set_stars_balance(
         user_id,
         amount,
-        title="Admin set",
-        description=f"Balance set to {amount} stars via @admin",
+        title="Установка администратором",
+        description=f"Баланс установлен на {amount} звёзд через @admin",
     )
     await upd.update_stars_balance(user_id, balance.to_stars_amount())
     await pages.page_user_stars(peer, user_id, menu, list_key=list_key)
-    return BotCallbackAnswer(message=f"Balance set to {amount} stars.", cache_time=0)
+    return BotCallbackAnswer(message=f"Баланс установлен на {amount} звёзд.", cache_time=0)
 
 
 async def delete_user_action(
@@ -157,29 +157,29 @@ async def delete_user_action(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
     if user is None:
-        return BotCallbackAnswer(message="User not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Пользователь не найден.", alert=True, cache_time=0)
     if user.admin and await User.filter(admin=True, bot=False, deleted=False).count() <= 1:
-        return BotCallbackAnswer(message="Cannot delete the last admin.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Нельзя удалить последнего администратора.", alert=True, cache_time=0)
 
     if user.system:
-        return BotCallbackAnswer(message="Cannot delete a service account.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Нельзя удалить служебный аккаунт.", alert=True, cache_time=0)
 
     kicked = await admin_delete_user(user)
     page, show_system = parse_user_list_key(list_key)
     await pages.page_users(peer, page, menu, show_system=show_system)
-    return BotCallbackAnswer(message=f"User deleted. Kicked {kicked} session(s).", cache_time=0)
+    return BotCallbackAnswer(message=f"Пользователь удалён. Отключено сессий: {kicked}.", cache_time=0)
 
 
 async def delete_bot_action(peer: Peer, menu: MessageRef, bot_id: int, *, list_key: str) -> BotCallbackAnswer:
     bot_user = await User.get_or_none(id=bot_id, bot=True, deleted=False)
     if bot_user is None:
-        return BotCallbackAnswer(message="Bot not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Бот не найден.", alert=True, cache_time=0)
     if bot_user.system:
-        return BotCallbackAnswer(message="Cannot delete a system bot.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Нельзя удалить системного бота.", alert=True, cache_time=0)
     await admin_delete_bot(bot_user)
     page, show_system = parse_bot_list_key(list_key)
     await pages_extended.page_bots(peer, page, menu, show_system=show_system)
-    return BotCallbackAnswer(message="Bot deleted.", cache_time=0)
+    return BotCallbackAnswer(message="Бот удалён.", cache_time=0)
 
 
 async def restore_deleted_account_action(
@@ -187,15 +187,15 @@ async def restore_deleted_account_action(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, deleted=True, system=False)
     if user is None:
-        return BotCallbackAnswer(message="Account not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Аккаунт не найден.", alert=True, cache_time=0)
 
     try:
         if user.bot:
             await admin_restore_bot(user)
-            label = "Bot restored."
+            label = "Бот восстановлен."
         else:
             await admin_restore_user(user)
-            label = "User restored."
+            label = "Пользователь восстановлен."
     except RestoreAccountError as exc:
         return BotCallbackAnswer(message=str(exc), alert=True, cache_time=0)
 
@@ -209,10 +209,10 @@ async def delete_channel_action(
 ) -> BotCallbackAnswer:
     channel = await Channel.get_or_none(id=channel_id, deleted=False)
     if channel is None:
-        return BotCallbackAnswer(message="Channel not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Канал не найден.", alert=True, cache_time=0)
     await delete_channel_admin(channel)
     await pages.page_channels(peer, 0, menu)
-    return BotCallbackAnswer(message="Channel deleted.", cache_time=0)
+    return BotCallbackAnswer(message="Канал удалён.", cache_time=0)
 
 
 async def kick_channel_member_action(
@@ -220,10 +220,10 @@ async def kick_channel_member_action(
 ) -> BotCallbackAnswer:
     channel = await Channel.get_or_none(id=channel_id, deleted=False)
     if channel is None:
-        return BotCallbackAnswer(message="Not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Не найдено.", alert=True, cache_time=0)
     await kick_channel_member(channel, target_id)
     await pages_extended.page_channel_members(peer, channel_id, 0, menu, list_key=list_key)
-    return BotCallbackAnswer(message="Member kicked.", cache_time=0)
+    return BotCallbackAnswer(message="Участник исключён.", cache_time=0)
 
 
 async def kick_group_member_action(
@@ -231,10 +231,10 @@ async def kick_group_member_action(
 ) -> BotCallbackAnswer:
     chat = await Chat.get_or_none(id=chat_id, deleted=False)
     if chat is None:
-        return BotCallbackAnswer(message="Not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Не найдено.", alert=True, cache_time=0)
     await kick_chat_member(chat, target_id, actor_id=peer.owner_id)
     await pages_extended.page_group_members(peer, chat_id, 0, menu, list_key=list_key)
-    return BotCallbackAnswer(message="Member kicked.", cache_time=0)
+    return BotCallbackAnswer(message="Участник исключён.", cache_time=0)
 
 
 async def promote_channel_admin_action(
@@ -242,13 +242,13 @@ async def promote_channel_admin_action(
 ) -> BotCallbackAnswer:
     channel = await Channel.get_or_none(id=channel_id, deleted=False)
     if channel is None:
-        return BotCallbackAnswer(message="Not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Не найдено.", alert=True, cache_time=0)
     try:
         await promote_channel_admin(channel, target_id)
     except ValueError:
-        return BotCallbackAnswer(message="Not a participant.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Не является участником.", alert=True, cache_time=0)
     await pages_extended.page_channel_members(peer, channel_id, 0, menu, list_key=list_key)
-    return BotCallbackAnswer(message="Admin rights granted.", cache_time=0)
+    return BotCallbackAnswer(message="Права администратора выданы.", cache_time=0)
 
 
 async def promote_group_admin_action(
@@ -256,13 +256,13 @@ async def promote_group_admin_action(
 ) -> BotCallbackAnswer:
     chat = await Chat.get_or_none(id=chat_id, deleted=False)
     if chat is None:
-        return BotCallbackAnswer(message="Not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Не найдено.", alert=True, cache_time=0)
     try:
         await promote_chat_admin(chat, target_id)
     except ValueError:
-        return BotCallbackAnswer(message="Not a participant.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Не является участником.", alert=True, cache_time=0)
     await pages_extended.page_group_members(peer, chat_id, 0, menu, list_key=list_key)
-    return BotCallbackAnswer(message="Admin rights granted.", cache_time=0)
+    return BotCallbackAnswer(message="Права администратора выданы.", cache_time=0)
 
 
 async def toggle_bot_verified(
@@ -270,12 +270,12 @@ async def toggle_bot_verified(
 ) -> BotCallbackAnswer:
     bot_user = await User.get_or_none(id=bot_id, bot=True, deleted=False)
     if bot_user is None:
-        return BotCallbackAnswer(message="Bot not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Бот не найден.", alert=True, cache_time=0)
     changed = await verification.set_user_verified(bot_user, verified)
     await pages_extended.page_bot(peer, bot_id, menu, list_key=list_key)
     if not changed:
-        return BotCallbackAnswer(message="Already up to date.", cache_time=0)
-    return BotCallbackAnswer(message="Checkmark updated.", cache_time=0)
+        return BotCallbackAnswer(message="Уже актуально.", cache_time=0)
+    return BotCallbackAnswer(message="Галочка обновлена.", cache_time=0)
 
 
 async def toggle_bot_system(
@@ -285,23 +285,23 @@ async def toggle_bot_system(
 
     bot_user = await User.get_or_none(id=bot_id, bot=True, deleted=False)
     if bot_user is None:
-        return BotCallbackAnswer(message="Bot not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Бот не найден.", alert=True, cache_time=0)
     if not system and await is_builtin_admin_bot(bot_user) and not confirm:
         await pages_extended.page_bot_unsystem_warning(peer, bot_id, menu, list_key=list_key)
         return BotCallbackAnswer(
-            message="⚠️ Removing system from @admin breaks built-in handlers.",
+            message="⚠️ Снятие системного статуса с @admin отключит встроенные обработчики.",
             alert=True,
             cache_time=0,
         )
     if bot_user.system == system:
-        return BotCallbackAnswer(message="Already up to date.", cache_time=0)
+        return BotCallbackAnswer(message="Уже актуально.", cache_time=0)
     bot_user.system = system
     await bot_user.save(update_fields=["system", "version"])
     await bot_user.inc_version()
     await upd.update_user(bot_user)
     await pages_extended.page_bot(peer, bot_id, menu, list_key=list_key)
-    action = "marked as system" if system else "unmarked as system"
-    return BotCallbackAnswer(message=f"Bot {action}.", cache_time=0)
+    action = "помечен как системный" if system else "снята пометка системного"
+    return BotCallbackAnswer(message=f"Бот {action}.", cache_time=0)
 
 
 async def revoke_bot_token_action(
@@ -311,20 +311,20 @@ async def revoke_bot_token_action(
 
     bot_user = await User.get_or_none(id=bot_id, bot=True, deleted=False)
     if bot_user is None:
-        return BotCallbackAnswer(message="Bot not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Бот не найден.", alert=True, cache_time=0)
     bot_row = await Bot.get_or_none(bot_id=bot_id)
     if bot_row is None:
-        return BotCallbackAnswer(message="Bot record not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Запись бота не найдена.", alert=True, cache_time=0)
 
     bot_row.token_nonce = bot_gen_token()
     await bot_row.save(update_fields=["token_nonce"])
     await pages_extended.page_bot_token(peer, bot_id, menu, list_key=list_key)
-    return BotCallbackAnswer(message="Token revoked.", cache_time=0)
+    return BotCallbackAnswer(message="Токен отозван.", cache_time=0)
 
 
 async def hide_message_action(peer: Peer, menu: MessageRef) -> BotCallbackAnswer:
     await hide_bot_message(peer, menu)
-    return BotCallbackAnswer(message="Hidden.", cache_time=0)
+    return BotCallbackAnswer(message="Скрыто.", cache_time=0)
 
 
 async def spam_from_report_action(
@@ -332,13 +332,13 @@ async def spam_from_report_action(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
     if user is None:
-        return BotCallbackAnswer(message="User not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Пользователь не найден.", alert=True, cache_time=0)
 
     changed = await set_user_spam_blocked(user, True)
     await pages_extended.page_report(peer, report_id, menu, list_key=list_key)
     if not changed:
-        return BotCallbackAnswer(message="Already spam blocked.", cache_time=0)
-    return BotCallbackAnswer(message="Spam block applied.", cache_time=0)
+        return BotCallbackAnswer(message="Уже заблокирован за спам.", cache_time=0)
+    return BotCallbackAnswer(message="Спам-блок применён.", cache_time=0)
 
 
 async def spam_author_from_report_action(
@@ -352,13 +352,13 @@ async def ban_user_from_report_action(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
     if user is None:
-        return BotCallbackAnswer(message="User not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Пользователь не найден.", alert=True, cache_time=0)
     if user.admin and await User.filter(admin=True, bot=False, deleted=False).count() <= 1:
-        return BotCallbackAnswer(message="Cannot delete the last admin.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Нельзя удалить последнего администратора.", alert=True, cache_time=0)
 
     kicked = await admin_delete_user(user)
     await pages_extended.page_report(peer, report_id, menu, list_key=list_key)
-    return BotCallbackAnswer(message=f"User banned. Kicked {kicked} session(s).", cache_time=0)
+    return BotCallbackAnswer(message=f"Пользователь заблокирован. Отключено сессий: {kicked}.", cache_time=0)
 
 
 async def ban_bot_from_report_action(
@@ -366,13 +366,13 @@ async def ban_bot_from_report_action(
 ) -> BotCallbackAnswer:
     bot_user = await User.get_or_none(id=bot_id, bot=True, deleted=False)
     if bot_user is None:
-        return BotCallbackAnswer(message="Bot not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Бот не найден.", alert=True, cache_time=0)
     if bot_user.system:
-        return BotCallbackAnswer(message="Cannot delete a system bot.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Нельзя удалить системного бота.", alert=True, cache_time=0)
 
     await admin_delete_bot(bot_user)
     await pages_extended.page_report(peer, report_id, menu, list_key=list_key)
-    return BotCallbackAnswer(message="Bot banned.", cache_time=0)
+    return BotCallbackAnswer(message="Бот заблокирован.", cache_time=0)
 
 
 async def review_report_action(
@@ -380,11 +380,11 @@ async def review_report_action(
 ) -> BotCallbackAnswer:
     report = await AdminReport.get_or_none(id=report_id)
     if report is None:
-        return BotCallbackAnswer(message="Report not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Жалоба не найдена.", alert=True, cache_time=0)
     report.reviewed = True
     await report.save(update_fields=["reviewed"])
     await pages_extended.page_report(peer, report_id, menu, list_key=list_key)
-    return BotCallbackAnswer(message="Marked reviewed.", cache_time=0)
+    return BotCallbackAnswer(message="Отмечено как рассмотренное.", cache_time=0)
 
 
 async def begin_search_input(
@@ -395,7 +395,7 @@ async def begin_search_input(
     filters = SearchFilters(kind=kind)
     await AdminBotUserState.set_state(admin_user_id, AdminBotState.WAIT_SEARCH, filters.encode())
     await pages_extended.page_search_prompt(peer, menu, filters=filters)
-    return BotCallbackAnswer(message="Send your search query in chat.", cache_time=0)
+    return BotCallbackAnswer(message="Отправьте поисковый запрос в чат.", cache_time=0)
 
 
 async def toggle_search_filter(
@@ -405,7 +405,7 @@ async def toggle_search_filter(
 
     state = await AdminBotUserState.get_or_none(user_id=admin_user_id)
     if state is None or state.state is not AdminBotState.WAIT_SEARCH:
-        return BotCallbackAnswer(message="Search session expired.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Сессия поиска истекла.", alert=True, cache_time=0)
 
     filters = SearchFilters.decode(state.data)
     filters.toggle(flag)
@@ -421,11 +421,11 @@ async def clear_bot_field(
     from piltover.db.enums import AdminBotState
 
     if field not in CLEARABLE_BOT_FIELDS:
-        return BotCallbackAnswer(message="This field cannot be cleared.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Это поле нельзя очистить.", alert=True, cache_time=0)
 
     bot_user = await User.get_or_none(id=bot_id, bot=True, deleted=False)
     if bot_user is None:
-        return BotCallbackAnswer(message="Bot not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Бот не найден.", alert=True, cache_time=0)
 
     error = await apply_bot_field_value(bot_user, field, "", clear=True)
     if error is not None:
@@ -433,7 +433,7 @@ async def clear_bot_field(
 
     await AdminBotUserState.filter(user_id=admin_user_id, state=AdminBotState.WAIT_BOT_EDIT).delete()
     await pages_extended.page_bot_settings(peer, bot_id, menu, list_key=list_key)
-    return BotCallbackAnswer(message="Cleared.", cache_time=0)
+    return BotCallbackAnswer(message="Очищено.", cache_time=0)
 
 
 async def begin_bot_edit_input(
@@ -441,9 +441,9 @@ async def begin_bot_edit_input(
 ) -> BotCallbackAnswer:
     bot_user = await User.get_or_none(id=bot_id, bot=True, deleted=False)
     if bot_user is None:
-        return BotCallbackAnswer(message="Bot not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Бот не найден.", alert=True, cache_time=0)
     if field == "username" and bot_user.system:
-        return BotCallbackAnswer(message="System bot username cannot be changed.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Имя пользователя системного бота нельзя изменить.", alert=True, cache_time=0)
 
     await AdminBotUserState.set_state(
         admin_user_id,
@@ -451,7 +451,7 @@ async def begin_bot_edit_input(
         f"{field}:{bot_id}:{list_key}:{menu.id}".encode(),
     )
     await pages_extended.page_bot_edit_prompt(peer, menu, bot_id, field, list_key=list_key)
-    return BotCallbackAnswer(message="Send the new value in chat.", cache_time=0)
+    return BotCallbackAnswer(message="Отправьте новое значение в чат.", cache_time=0)
 
 
 async def begin_transfer_owner_input(
@@ -463,7 +463,7 @@ async def begin_transfer_owner_input(
         AdminBotState.WAIT_TRANSFER_OWNER,
         f"{entity_kind}:{entity_id}:{list_key}".encode(),
     )
-    return BotCallbackAnswer(message="Send new owner user ID in chat.", alert=True, cache_time=0)
+    return BotCallbackAnswer(message="Отправьте ID нового владельца в чат.", alert=True, cache_time=0)
 
 
 async def begin_custom_stars_input(
@@ -471,7 +471,7 @@ async def begin_custom_stars_input(
 ) -> BotCallbackAnswer:
     user = await User.get_or_none(id=user_id, bot=False, system=False, deleted=False)
     if user is None:
-        return BotCallbackAnswer(message="User not found.", alert=True, cache_time=0)
+        return BotCallbackAnswer(message="Пользователь не найден.", alert=True, cache_time=0)
 
     await AdminBotUserState.set_state(
         admin_user_id,
@@ -480,7 +480,7 @@ async def begin_custom_stars_input(
     )
     await pages.page_user_stars(peer, user_id, menu, list_key=list_key)
     return BotCallbackAnswer(
-        message="Send the desired star balance as a number in chat.",
+        message="Отправьте желаемый баланс звёзд числом в чат.",
         alert=True,
         cache_time=0,
     )

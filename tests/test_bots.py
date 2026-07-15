@@ -10,7 +10,7 @@ from pyrogram.raw.functions.messages import GetPeerDialogs
 from pyrogram.raw.types import InputDialogPeer
 
 from piltover.db.enums import PeerType
-from piltover.db.models import User, Username, Bot, State, Peer, Dialog
+from piltover.db.models import BotInfo, User, Username, Bot, State, Peer, Dialog
 from tests.client import TestClient
 
 
@@ -178,6 +178,76 @@ async def test_botfather_mybots_pagination(exit_stack: AsyncExitStack) -> None:
     assert new_message.reply_markup.inline_keyboard[-1][-1].text == "->"
 
     assert new_message.reply_markup == bot_message.reply_markup
+
+
+@pytest.mark.asyncio
+async def test_botfather_delete_bot(app_server) -> None:
+    async with TestClient(phone_number="123456789") as client:
+        db_user = await User.get(phone_number=client.phone_number)
+        bot, = await _create_bots(db_user, 1, username_prefix="bdel_")
+
+        await client.send_message("botfather", "/mybots")
+        updates = await client.expect_updates(UpdateNewMessage, UpdateNewMessage)
+        updates.sort(key=lambda u: u.message.id)
+        _, bot_response = updates
+        bot_message = await PyroMessage._parse(client, bot_response.message, {}, {})
+        await bot_message.click("@bdel_test_0_bot")
+
+        bot_response = await client.expect_update(UpdateEditMessage)
+        bot_message = await PyroMessage._parse(client, bot_response.message, {}, {})
+        await bot_message.click("Delete Bot")
+
+        bot_response = await client.expect_update(UpdateEditMessage)
+        bot_message = await PyroMessage._parse(client, bot_response.message, {}, {})
+        assert "You are about to delete your bot" in bot_message.text
+        assert "@bdel_test_0_bot" in bot_message.text
+
+        labels = [row[0].text for row in bot_message.reply_markup.inline_keyboard[:3]]
+        assert set(labels) == {"Yes, delete the bot", "Nope, nevermind", "No"}
+        assert bot_message.reply_markup.inline_keyboard[-1][0].text == "« Back to Bot"
+
+        await bot_message.click("Yes, delete the bot")
+        bot_response = await client.expect_update(UpdateEditMessage)
+        bot_message = await PyroMessage._parse(client, bot_response.message, {}, {})
+        assert bot_message.text == "Done! The bot is gone."
+
+        assert not await Bot.filter(bot_id=bot.bot_id).exists()
+        assert not await Username.filter(username="bdel_test_0_bot").exists()
+        bot_user = await User.get(id=bot.bot_id)
+        assert bot_user.deleted
+
+
+@pytest.mark.asyncio
+async def test_botfather_bot_settings(app_server) -> None:
+    async with TestClient(phone_number="123456789") as client:
+        db_user = await User.get(phone_number=client.phone_number)
+        bot, = await _create_bots(db_user, 1, username_prefix="bset_")
+
+        await client.send_message("botfather", "/mybots")
+        updates = await client.expect_updates(UpdateNewMessage, UpdateNewMessage)
+        updates.sort(key=lambda u: u.message.id)
+        _, bot_response = updates
+        bot_message = await PyroMessage._parse(client, bot_response.message, {}, {})
+        await bot_message.click(f"@bset_test_0_bot")
+
+        bot_response = await client.expect_update(UpdateEditMessage)
+        bot_message = await PyroMessage._parse(client, bot_response.message, {}, {})
+        await bot_message.click("Bot Settings")
+
+        bot_response = await client.expect_update(UpdateEditMessage)
+        bot_message = await PyroMessage._parse(client, bot_response.message, {}, {})
+        assert "Settings for @bset_test_0_bot" in bot_message.text
+
+        await bot_message.click("Inline Mode")
+        bot_response = await client.expect_update(UpdateEditMessage)
+        bot_message = await PyroMessage._parse(client, bot_response.message, {}, {})
+        assert "Inline mode is currently disabled" in bot_message.text
+
+        answer = await bot_message.click("Turn on")
+        assert answer.message == "Success! Settings updated."
+
+        info = await BotInfo.get_or_create_for_bot(bot.bot_id)
+        assert info.inline_mode is True
 
 
 @pytest.mark.asyncio

@@ -84,7 +84,7 @@ async def test_admin_kick_sessions() -> None:
             peer, menu, f"adm:act:kick:{target_id}:u0".encode(),
         )
         assert answer is not None
-        assert "kicked" in (answer.message or "").lower()
+        assert "сесси" in (answer.message or "").lower()
 
     assert await UserAuthorization.filter(user_id=target_id).count() == 0
 
