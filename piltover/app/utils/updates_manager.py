@@ -138,7 +138,7 @@ async def send_message(
             updates.updates.insert(0, UpdateMessageID(id=message.id, random_id=message.random_id))
 
         if target_user_id == current_user_id:
-            if message.random_id:
+            if message.random_id and len(messages) > 1:
                 # Sender already has optimistic content locally; merge by pts_count=0.
                 result = UpdatesWithDefaults(
                     updates=[
@@ -268,28 +268,18 @@ async def send_message_channel(user_id: int, channel: Channel, message: MessageR
         ignore_auth_id=sender_auth_id,
     )
 
+    updates: list[base.Update] = [
+        UpdateNewChannelMessage(
+            message=message_for_user,
+            pts=new_pts,
+            pts_count=1,
+        ),
+    ]
     if message.random_id:
-        return UpdatesWithDefaults(
-            updates=[
-                UpdateMessageID(id=message.id, random_id=message.random_id),
-                UpdateNewChannelMessage(
-                    message=generic_message,
-                    pts=new_pts,
-                    pts_count=0,
-                ),
-            ],
-            users=users,
-            chats=chats_and_channels,
-        )
+        updates.insert(0, UpdateMessageID(id=message.id, random_id=message.random_id))
 
     return UpdatesWithDefaults(
-        updates=[
-            UpdateNewChannelMessage(
-                message=message_for_user,
-                pts=new_pts,
-                pts_count=1,
-            ),
-        ],
+        updates=updates,
         users=users,
         chats=chats_and_channels,
     )
