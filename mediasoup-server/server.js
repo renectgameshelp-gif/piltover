@@ -173,15 +173,21 @@ class Peer {
     this.roomId = roomId;
     this.socket = socket;
     this.telegramSsrc = null;
+    this.streamSsrcs = new Map();
     this.transports = new Map();
+    this.streamTransports = new Map();
     this.producers = new Map();
     this.consumers = new Map();
     this.pendingConsumers = [];
   }
 
-  addTransport(transport, direction) {
+  addTransport(transport, direction, streamKind = 'audio') {
     transport._direction = direction;
+    transport._streamKind = streamKind;
     this.transports.set(transport.id, transport);
+    if (direction === 'send') {
+      this.streamTransports.set(streamKind, transport);
+    }
     transportsById.set(transport.id, transport);
   }
 
@@ -596,21 +602,27 @@ function isTransportUsable(transport) {
   return transport && !transport.closed && transport.dtlsState === 'connected';
 }
 
-function canReusePeerTransport(transport, peer, mediaSsrc) {
+function canReusePeerTransport(transport, peer, mediaSsrc, streamKind = 'audio') {
   if (!transport || transport.closed) return false;
-  if (peer.telegramSsrc !== null && peer.telegramSsrc !== mediaSsrc) return false;
+  const knownSsrc = peer.streamSsrcs.get(streamKind);
+  if (knownSsrc !== undefined && knownSsrc !== mediaSsrc) return false;
+  if (streamKind === 'audio' && peer.telegramSsrc !== null && peer.telegramSsrc !== mediaSsrc) return false;
   if (transport.dtlsState === 'connected') return true;
   const iceReady = transport.iceState === 'connected' || transport.iceState === 'completed';
   return iceReady && (transport.dtlsState === 'connecting' || transport.dtlsState === 'new');
 }
 
-function closePeerSendTransports(peer) {
-  for (const [transportId, transport] of peer.transports) {
-    if (transport._direction !== 'send') continue;
-    transport.close();
-    peer.transports.delete(transportId);
-    transportsById.delete(transportId);
+function closePeerStreamTransport(peer, streamKind = 'audio') {
+  const transport = peer.streamTransports.get(streamKind);
+  if (!transport || transport.closed) {
+    peer.streamTransports.delete(streamKind);
+    return;
   }
+  transport.close();
+  peer.streamTransports.delete(streamKind);
+  peer.transports.delete(transport.id);
+  transportsById.delete(transport.id);
+  peer.streamSsrcs.delete(streamKind);
 }
 
 function prunePeerSendTransport(peer, transport) {
@@ -695,12 +707,15 @@ async function createWebRtcTransport(peer = null) {
   return transport;
 }
 
-function getPeerSendTransport(peer) {
-  for (const transport of peer.transports.values()) {
-    if (transport._direction === 'send') return transport;
+function getPeerSendTransport(peer, streamKind = 'audio') {
+  const transport = peer.streamTransports.get(streamKind);
+  if (transport && !transport.closed) return transport;
+  for (const candidate of peer.transports.values()) {
+    if (candidate._direction === 'send' && candidate._streamKind === streamKind) {
+      return candidate;
+    }
   }
-  const first = peer.transports.values().next();
-  return first.done ? null : first.value;
+  return null;
 }
 
 function queuePendingConsumer(peer, producer, producerPeer) {
@@ -779,6 +794,89 @@ async function pipeExistingProducersToPeer(room, newPeer) {
   }
 }
 
+function buildVideoRtpParameters(clientParams, ssrc) {
+  const root = getMediaParams(clientParams);
+  const payloadTypes = root['payload-types'] || root.payloadTypes || [];
+  const rtpHdrExts = root['rtp-hdrexts'] || root.rtpHdrExts || [];
+
+  const videoPt = payloadTypes.find((pt) => {
+    const name = String(pt.name || '').toLowerCase();
+    return ['vp8', 'vp9', 'h264', 'av1', 'video'].includes(name) || name.startsWith('video/');
+  }) || payloadTypes[0];
+
+  if (!videoPt) {
+    if (!router) return null;
+    const videoCodec = router.rtpCapabilities.codecs.find((codec) => codec.kind === 'video');
+    if (!videoCodec) return null;
+    return {
+      mid: 'video',
+      codecs: [{
+        mimeType: videoCodec.mimeType,
+        payloadType: videoCodec.preferredPayloadType || 96,
+        clockRate: videoCodec.clockRate,
+        parameters: videoCodec.parameters || {},
+        rtcpFeedback: [
+          { type: 'nack', parameter: '' },
+          { type: 'nack', parameter: 'pli' },
+          { type: 'ccm', parameter: 'fir' },
+          { type: 'goog-remb', parameter: '' },
+          { type: 'transport-cc', parameter: '' },
+        ],
+      }],
+      headerExtensions: router.rtpCapabilities.headerExtensions
+        .filter((ext) => !ext.kind || ext.kind === 'video')
+        .map((ext) => ({ uri: ext.uri, id: ext.preferredId })),
+      encodings: [{ ssrc: Number(ssrc) }],
+      rtcp: { cname: `piltover-video-${ssrc}`, reducedSize: true, mux: true },
+    };
+  }
+
+  const mimeName = String(videoPt.name || 'VP8').toLowerCase();
+  const mimeType = mimeName.includes('/') ? mimeName : `video/${mimeName}`;
+
+  return {
+    mid: 'video',
+    codecs: [{
+      mimeType,
+      payloadType: videoPt.id,
+      clockRate: videoPt.clockrate || videoPt.clockRate || 90000,
+      parameters: videoPt.parameters || {},
+      rtcpFeedback: (videoPt['rtcp-fbs'] || videoPt.rtcpFbs || []).map((fb) => ({
+        type: fb.type,
+        parameter: fb.subtype || fb.parameter || '',
+      })),
+    }],
+    headerExtensions: rtpHdrExts.map((ext) => ({
+      uri: ext.uri,
+      id: ext.id,
+    })),
+    encodings: [{ ssrc: Number(ssrc) }],
+    rtcp: { cname: `piltover-video-${ssrc}`, reducedSize: true, mux: true },
+  };
+}
+
+async function createVideoProducer(peer, transport, clientParams, mediaSsrc, streamKind) {
+  const rtpParameters = buildVideoRtpParameters(clientParams, mediaSsrc);
+  if (!rtpParameters) {
+    logger.warn(`Could not build video RTP parameters for peer ${peer.id} stream=${streamKind}`);
+    return null;
+  }
+
+  const producer = await transport.produce({
+    kind: 'video',
+    rtpParameters,
+    appData: { telegramSsrc: mediaSsrc, streamKind },
+  });
+  peer.streamSsrcs.set(streamKind, mediaSsrc);
+  peer.addProducer(producer);
+  producer.on('transportclose', () => {
+    peer.producers.delete(producer.id);
+    producersById.delete(producer.id);
+    peer.streamSsrcs.delete(streamKind);
+  });
+  return producer;
+}
+
 async function createAudioProducer(peer, transport, clientParams, mediaSsrc) {
   const rtpParameters = buildAudioRtpParameters(clientParams, mediaSsrc);
   if (!rtpParameters) {
@@ -792,6 +890,7 @@ async function createAudioProducer(peer, transport, clientParams, mediaSsrc) {
     appData: { telegramSsrc: mediaSsrc },
   });
   peer.telegramSsrc = mediaSsrc;
+  peer.streamSsrcs.set('audio', mediaSsrc);
   peer.addProducer(producer);
   producer.on('transportclose', () => {
     peer.producers.delete(producer.id);
@@ -980,10 +1079,13 @@ app.post('/api/leave', async (req, res) => {
 
 app.post('/api/join', async (req, res) => {
   try {
-    const { roomId, peerId, ssrc, clientParams } = req.body;
+    const { roomId, peerId, ssrc, clientParams, streamKind: rawStreamKind } = req.body;
     if (!roomId || !peerId || !ssrc) {
       return res.status(400).json({ error: 'roomId, peerId and ssrc are required' });
     }
+
+    const streamKind = String(rawStreamKind || 'audio').toLowerCase();
+    const isVideoStream = streamKind === 'video' || streamKind === 'presentation';
 
     const mediaParams = getMediaParams(clientParams);
     const mediaSsrc = Number(mediaParams.ssrc ?? ssrc);
@@ -997,59 +1099,67 @@ app.post('/api/join', async (req, res) => {
     const payloadTypes = mediaParams['payload-types'] || mediaParams.payloadTypes || [];
     const clientCandidates = (getTransportParams(clientParams).candidates || []).length;
     logger.info(
-      `Join peer ${peerId} room ${roomId} ssrc=${mediaSsrc} keys=[${paramKeys}] payload-types=${payloadTypes.length} client-candidates=${clientCandidates}`,
+      `Join peer ${peerId} room ${roomId} stream=${streamKind} ssrc=${mediaSsrc} keys=[${paramKeys}] payload-types=${payloadTypes.length} client-candidates=${clientCandidates}`,
     );
 
     const clientSetup = clientSetupFromParams(clientParams);
-    logger.info(`Join peer ${peerId} client DTLS setup=${clientSetup}`);
+    logger.info(`Join peer ${peerId} stream=${streamKind} client DTLS setup=${clientSetup}`);
 
-    let transport = getPeerSendTransport(peer);
-    if (canReusePeerTransport(transport, peer, mediaSsrc)) {
+    let transport = getPeerSendTransport(peer, streamKind);
+    if (canReusePeerTransport(transport, peer, mediaSsrc, streamKind)) {
       logger.info(
-        `Reusing transport ${transport.id} for peer ${peerId} ssrc=${mediaSsrc} ice=${transport.iceState} dtls=${transport.dtlsState}`,
+        `Reusing transport ${transport.id} for peer ${peerId} stream=${streamKind} ssrc=${mediaSsrc} ice=${transport.iceState} dtls=${transport.dtlsState}`,
       );
       return res.json(toTelegramConnection(transport, mediaSsrc, clientParams, clientSetup));
     }
 
-    if (peer.telegramSsrc !== null && peer.telegramSsrc !== mediaSsrc) {
+    const previousSsrc = peer.streamSsrcs.get(streamKind)
+      ?? (streamKind === 'audio' ? peer.telegramSsrc : null);
+    if (previousSsrc !== null && previousSsrc !== undefined && previousSsrc !== mediaSsrc) {
       logger.info(
-        `Peer ${peerId} rejoining room ${roomId} with new ssrc ${mediaSsrc} (was ${peer.telegramSsrc})`,
+        `Peer ${peerId} rejoining room ${roomId} stream=${streamKind} with new ssrc ${mediaSsrc} (was ${previousSsrc})`,
       );
     }
 
-    closePeerSendTransports(peer);
-    peer.pendingConsumers = [];
+    closePeerStreamTransport(peer, streamKind);
+    if (streamKind === 'audio') {
+      peer.pendingConsumers = [];
+    }
     transport = await createWebRtcTransport(peer);
-    peer.addTransport(transport, 'send');
+    peer.addTransport(transport, 'send', streamKind);
 
     const clientDtls = extractClientDtls(clientParams);
     if (clientDtls?.fingerprints.length) {
       await transport.connect({ dtlsParameters: clientDtls });
       const serverSetup = serverSetupForClient(clientSetup);
       logger.info(
-        `Transport ${transport.id} DTLS configured for peer ${peerId} remote_role=${clientDtls.role} local_role=${transport.dtlsParameters.role} client_setup=${clientSetup} server_setup=${serverSetup}`,
+        `Transport ${transport.id} DTLS configured for peer ${peerId} stream=${streamKind} remote_role=${clientDtls.role} local_role=${transport.dtlsParameters.role} client_setup=${clientSetup} server_setup=${serverSetup}`,
       );
     } else {
-      logger.warn(`No client DTLS fingerprints for peer ${peerId} in room ${roomId}`);
+      logger.warn(`No client DTLS fingerprints for peer ${peerId} stream=${streamKind} in room ${roomId}`);
     }
 
     try {
-      const producer = await createAudioProducer(peer, transport, clientParams, mediaSsrc);
+      const producer = isVideoStream
+        ? await createVideoProducer(peer, transport, clientParams, mediaSsrc, streamKind)
+        : await createAudioProducer(peer, transport, clientParams, mediaSsrc);
       if (producer) {
-        if (isPeerAudioPaused(roomId, peerId)) {
+        if (!isVideoStream && isPeerAudioPaused(roomId, peerId)) {
           await producer.pause();
         }
         await notifyNewProducer(room, peer, producer);
-        await pipeExistingProducersToPeer(room, peer);
+        if (streamKind === 'audio') {
+          await pipeExistingProducersToPeer(room, peer);
+        }
         if (isTransportUsable(transport)) {
           await flushPendingConsumers(peer);
         }
         logger.info(
-          `Producer ${producer.id} created for peer ${peerId} ssrc=${mediaSsrc} fallback=${payloadTypes.length === 0}`,
+          `Producer ${producer.id} kind=${producer.kind} stream=${streamKind} created for peer ${peerId} ssrc=${mediaSsrc} fallback=${payloadTypes.length === 0}`,
         );
       }
     } catch (produceError) {
-      logger.error(`Failed to create producer for peer ${peerId}`, { error: produceError.message });
+      logger.error(`Failed to create producer for peer ${peerId} stream=${streamKind}`, { error: produceError.message });
     }
 
     res.json(toTelegramConnection(transport, mediaSsrc, clientParams, clientSetup));
@@ -1069,7 +1179,7 @@ app.post('/api/transports/create', async (req, res) => {
     const room = getOrCreateRoom(String(roomId));
     const peer = room.getOrCreatePeer(String(peerId));
     if (direction === 'send') {
-      closePeerSendTransports(peer);
+      closePeerStreamTransport(peer, 'audio');
     }
     const transport = await createWebRtcTransport();
     peer.addTransport(transport, direction);

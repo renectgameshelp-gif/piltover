@@ -59,6 +59,59 @@ def resolve_join_muted(request_muted: bool, group_call: GroupCall) -> bool:
     return request_muted
 
 
+_STREAM_KIND_AUDIO = "audio"
+_STREAM_KIND_VIDEO = "video"
+_STREAM_KIND_PRESENTATION = "presentation"
+
+_VIDEO_PAYLOAD_NAMES = frozenset({"vp8", "vp9", "h264", "av1", "video"})
+_AUDIO_PAYLOAD_NAMES = frozenset({"opus", "audio"})
+
+
+def _payload_types(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = payload.get("payload-types") or payload.get("payloadTypes") or []
+    if not isinstance(raw, list):
+        return []
+    return [pt for pt in raw if isinstance(pt, dict)]
+
+
+def payload_has_video(payload: dict[str, Any]) -> bool:
+    for pt in _payload_types(payload):
+        name = str(pt.get("name", "")).lower()
+        if name in _VIDEO_PAYLOAD_NAMES or name.startswith("video/"):
+            return True
+    return False
+
+
+def payload_has_audio(payload: dict[str, Any]) -> bool:
+    for pt in _payload_types(payload):
+        name = str(pt.get("name", "")).lower()
+        if name in _AUDIO_PAYLOAD_NAMES or name.startswith("audio/"):
+            return True
+        if (pt.get("channels") or 0) > 0:
+            return True
+    return False
+
+
+def detect_join_stream_kind(payload: dict[str, Any], *, is_presentation: bool = False) -> str:
+    if is_presentation:
+        return _STREAM_KIND_PRESENTATION
+    if payload_has_video(payload) and not payload_has_audio(payload):
+        return _STREAM_KIND_VIDEO
+    return _STREAM_KIND_AUDIO
+
+
+def parse_source_groups(payload: dict[str, Any], fallback_ssrc: int) -> list[dict[str, Any]]:
+    groups = payload.get("ssrc-groups") or payload.get("ssrcGroups")
+    if isinstance(groups, list) and groups:
+        return groups
+    return [{"semantics": "default", "sources": [fallback_ssrc]}]
+
+
+def make_stream_endpoint(group_call_id: int, user_id: int, stream_kind: str) -> str:
+    sfu = SYSTEM_CONFIG.group_call_sfu
+    return f"{sfu.public_ip}/{group_call_id}/{user_id}/{stream_kind}"
+
+
 _SPEAKING_BROADCAST_INTERVAL = 0.25
 _GROUP_CALL_DISCONNECT_GRACE = 5.0
 _last_speaking_broadcast: dict[tuple[int, int], float] = {}
@@ -255,22 +308,37 @@ def allocate_random_ssrc() -> int:
     return random.randint(1_000_000, 9_999_999)
 
 
+async def _participant_taken_sources(group_call: GroupCall, user_id: int) -> set[int]:
+    taken: set[int] = set()
+    participants = await GroupCallParticipant.filter(group_call=group_call).exclude(user_id=user_id)
+    for participant in participants:
+        taken.add(participant.source)
+        if participant.video_source is not None:
+            taken.add(participant.video_source)
+        if participant.presentation_source is not None:
+            taken.add(participant.presentation_source)
+    return taken
+
+
 async def ensure_unique_ssrc(
         group_call: GroupCall,
         ssrc: int | None,
         *,
         user_id: int,
+        exclude_sources: set[int] | None = None,
 ) -> int:
-    taken = GroupCallParticipant.filter(group_call=group_call).exclude(user_id=user_id)
+    taken = await _participant_taken_sources(group_call, user_id)
+    if exclude_sources:
+        taken -= exclude_sources
 
     if ssrc is not None:
-        if await taken.filter(source=ssrc).exists():
+        if ssrc in taken:
             raise ErrorRpc(error_code=400, error_message="GROUPCALL_SSRC_DUPLICATE_MUCH")
         return ssrc
 
     for _ in range(10):
         candidate = allocate_random_ssrc()
-        if not await taken.filter(source=candidate).exists():
+        if candidate not in taken:
             return candidate
     return await allocate_source(group_call)
 
@@ -577,6 +645,7 @@ async def build_connection_params(
         group_call_id: int,
         user_id: int,
         source: int,
+        stream_kind: str = _STREAM_KIND_AUDIO,
 ) -> DataJSON:
     payload = _parse_client_params(client_params)
     client_setup = _client_setup_from_payload(payload)
@@ -588,10 +657,11 @@ async def build_connection_params(
     media_ssrc = _extract_client_ssrc(payload, source)
     payload_types = payload.get("payload-types") or payload.get("payloadTypes") or []
     logger.info(
-        "JoinGroupCall SFU request call={} user={} source={} media_ssrc={} keys={} payload_types={}",
+        "JoinGroupCall SFU request call={} user={} source={} stream={} media_ssrc={} keys={} payload_types={}",
         group_call_id,
         user_id,
         source,
+        stream_kind,
         media_ssrc,
         list(payload.keys()),
         len(payload_types) if isinstance(payload_types, list) else 0,
@@ -607,6 +677,7 @@ async def build_connection_params(
                     "roomId": str(group_call_id),
                     "peerId": str(user_id),
                     "ssrc": media_ssrc,
+                    "streamKind": stream_kind,
                     "clientParams": payload,
                 },
             )
@@ -647,6 +718,7 @@ async def create_group_call(
         await discard_active_call(chat_or_channel)
         if title is None:
             title = chat_or_channel.name
+        join_muted = isinstance(chat_or_channel, Channel)
         group_call = await GroupCall.create(
             creator_id=user_id,
             chat=chat_or_channel if isinstance(chat_or_channel, Chat) else None,
@@ -654,6 +726,7 @@ async def create_group_call(
             title=title,
             schedule_date=schedule_date,
             started_at=None if schedule_date is not None else datetime.now(UTC),
+            join_muted=join_muted,
         )
     return group_call
 
@@ -718,6 +791,105 @@ async def join_group_call(
     return participant, just_joined
 
 
+async def _require_active_participant(group_call: GroupCall, user_id: int) -> GroupCallParticipant:
+    participant = await GroupCallParticipant.get_or_none(
+        group_call=group_call, user_id=user_id, left=False,
+    )
+    if participant is None:
+        raise ErrorRpc(error_code=400, error_message="GROUPCALL_JOIN_MISSING")
+    return participant
+
+
+async def join_group_call_video(
+        user_id: int,
+        group_call: GroupCall,
+        *,
+        client_ssrc: int | None,
+        client_payload: dict[str, Any],
+        video_stopped: bool,
+) -> GroupCallParticipant:
+    participant = await _require_active_participant(group_call, user_id)
+    if video_stopped:
+        participant.video_stopped = True
+        participant.video_source = None
+        participant.video_endpoint = None
+        participant.video_source_groups = None
+        participant.video_paused = False
+        await participant.save(update_fields=[
+            "video_stopped", "video_source", "video_endpoint", "video_source_groups", "video_paused",
+        ])
+        await group_call.bump_participants_version()
+        return participant
+
+    video_source = await ensure_unique_ssrc(
+        group_call, client_ssrc, user_id=user_id, exclude_sources={participant.source},
+    )
+    source_groups = parse_source_groups(client_payload, video_source)
+    participant.video_stopped = False
+    participant.video_paused = False
+    participant.video_source = video_source
+    participant.video_endpoint = make_stream_endpoint(group_call.id, user_id, _STREAM_KIND_VIDEO)
+    participant.video_source_groups = source_groups
+    await participant.save(update_fields=[
+        "video_stopped", "video_paused", "video_source", "video_endpoint", "video_source_groups",
+    ])
+    await group_call.bump_participants_version()
+    return participant
+
+
+async def join_group_call_presentation(
+        user_id: int,
+        group_call: GroupCall,
+        *,
+        client_ssrc: int | None,
+        client_payload: dict[str, Any],
+) -> GroupCallParticipant:
+    participant = await _require_active_participant(group_call, user_id)
+    presentation_source = await ensure_unique_ssrc(
+        group_call,
+        client_ssrc,
+        user_id=user_id,
+        exclude_sources={participant.source, participant.video_source or -1},
+    )
+    source_groups = parse_source_groups(client_payload, presentation_source)
+    participant.presentation_paused = False
+    participant.presentation_source = presentation_source
+    participant.presentation_endpoint = make_stream_endpoint(
+        group_call.id, user_id, _STREAM_KIND_PRESENTATION,
+    )
+    participant.presentation_source_groups = source_groups
+    await participant.save(update_fields=[
+        "presentation_paused", "presentation_source", "presentation_endpoint", "presentation_source_groups",
+    ])
+    await group_call.bump_participants_version()
+    return participant
+
+
+async def leave_group_call_presentation(
+        user_id: int,
+        group_call: GroupCall,
+) -> GroupCallParticipant:
+    participant = await _require_active_participant(group_call, user_id)
+    participant.presentation_source = None
+    participant.presentation_endpoint = None
+    participant.presentation_source_groups = None
+    participant.presentation_paused = False
+    await participant.save(update_fields=[
+        "presentation_source", "presentation_endpoint", "presentation_source_groups", "presentation_paused",
+    ])
+    await group_call.bump_participants_version()
+    return participant
+
+
+def participant_active_sources(participant: GroupCallParticipant) -> set[int]:
+    sources = {participant.source}
+    if participant.video_source is not None:
+        sources.add(participant.video_source)
+    if participant.presentation_source is not None:
+        sources.add(participant.presentation_source)
+    return sources
+
+
 async def resolve_group_call_participant(
         editor_user_id: int,
         group_call: GroupCall,
@@ -758,6 +930,7 @@ async def edit_group_call_participant(
         raise_hand: bool | None,
         video_stopped: bool | None,
         video_paused: bool | None,
+        presentation_paused: bool | None,
 ) -> tuple[GroupCallParticipant, bool]:
     if group_call.discarded_at is not None:
         raise ErrorRpc(error_code=403, error_message="GROUPCALL_FORBIDDEN")
@@ -766,7 +939,7 @@ async def edit_group_call_participant(
     editing_self = participant.user_id == editor_user_id
     logger.info(
         "GroupCallMute edit start call={} editor={} target={} editing_self={} "
-        "req(muted={} volume={} raise_hand={} video_stopped={} video_paused={}) before={}",
+        "req(muted={} volume={} raise_hand={} video_stopped={} video_paused={} presentation_paused={}) before={}",
         group_call.id,
         editor_user_id,
         participant.user_id,
@@ -776,6 +949,7 @@ async def edit_group_call_participant(
         raise_hand,
         video_stopped,
         video_paused,
+        presentation_paused,
         participant.format_mute_debug(),
     )
 
@@ -854,9 +1028,21 @@ async def edit_group_call_participant(
     if video_stopped is not None:
         participant.video_stopped = video_stopped
         update_fields.append("video_stopped")
-    elif video_paused is not None:
-        participant.video_stopped = video_paused
-        update_fields.append("video_stopped")
+        if video_stopped:
+            participant.video_source = None
+            participant.video_endpoint = None
+            participant.video_source_groups = None
+            participant.video_paused = False
+            update_fields.extend([
+                "video_source", "video_endpoint", "video_source_groups", "video_paused",
+            ])
+    if video_paused is not None:
+        participant.video_paused = video_paused
+        update_fields.append("video_paused")
+
+    if presentation_paused is not None:
+        participant.presentation_paused = presentation_paused
+        update_fields.append("presentation_paused")
 
     update_fields.extend(normalize_admin_mute_db_state(participant))
 
@@ -967,7 +1153,17 @@ async def leave_group_call(group_call: GroupCall, user_id: int, source: int) -> 
             group_call.id, user_id, source, participant.source,
         )
     participant.left = True
-    await participant.save(update_fields=["left"])
+    participant.video_source = None
+    participant.video_endpoint = None
+    participant.video_source_groups = None
+    participant.presentation_source = None
+    participant.presentation_endpoint = None
+    participant.presentation_source_groups = None
+    await participant.save(update_fields=[
+        "left",
+        "video_source", "video_endpoint", "video_source_groups",
+        "presentation_source", "presentation_endpoint", "presentation_source_groups",
+    ])
     await group_call.bump_participants_version()
     clear_speaking_state(group_call.id, user_id)
     asyncio.create_task(leave_sfu_peer(group_call.id, user_id))

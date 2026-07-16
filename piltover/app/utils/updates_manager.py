@@ -2916,9 +2916,14 @@ async def group_call_speaking_update(
     await SessionManager.send(updates, user_id=recipients)
 
 
-async def group_call_connection_update(user_id: int, params) -> Updates:
+async def group_call_connection_update(
+        user_id: int,
+        params,
+        *,
+        presentation: bool = False,
+) -> Updates:
     updates = UpdatesWithDefaults(
-        updates=[UpdateGroupCallConnection(params=params)],
+        updates=[UpdateGroupCallConnection(params=params, presentation=presentation)],
     )
     await SessionManager.send(updates, user_id=user_id)
     return updates

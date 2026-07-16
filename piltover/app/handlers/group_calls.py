@@ -9,9 +9,10 @@ import piltover.app.utils.updates_manager as upd
 from piltover.app.utils.updates_manager import UpdatesWithDefaults
 from piltover.app.utils.group_calls import (
     build_connection_params, build_phone_group_call, close_group_call_room,
-    create_group_call, edit_group_call_participant, ensure_can_manage_call, gen_invite_hash,
-    discard_group_call_if_empty, get_join_as_peers, join_group_call, leave_group_call, parse_join_client_params,
-    resolve_chat_or_channel, save_default_join_as, send_group_call_service_message,
+    create_group_call, detect_join_stream_kind, edit_group_call_participant, ensure_can_manage_call, gen_invite_hash,
+    discard_group_call_if_empty, get_join_as_peers, join_group_call, join_group_call_presentation,
+    join_group_call_video, leave_group_call, leave_group_call_presentation, parse_join_client_params,
+    participant_active_sources, resolve_chat_or_channel, save_default_join_as, send_group_call_service_message,
     schedule_sfu_participant_audio_state,
 )
 from piltover.db.models import Channel, GroupCall, GroupCallParticipant, User
@@ -22,7 +23,8 @@ from piltover.tl.functions.phone import (
     CheckGroupCall, CreateGroupCall, DiscardGroupCall, EditGroupCallParticipant, EditGroupCallTitle,
     ExportGroupCallInvite, GetGroupCall, GetGroupCallJoinAs, GetGroupCallStreamChannels,
     GetGroupCallStreamRtmpUrl, GetGroupParticipants, JoinGroupCall,
-    JoinGroupCall_133, LeaveGroupCall, SaveDefaultGroupCallJoinAs, StartScheduledGroupCall,
+    JoinGroupCall_133, JoinGroupCallPresentation, LeaveGroupCall, LeaveGroupCallPresentation,
+    SaveDefaultGroupCallJoinAs, StartScheduledGroupCall,
     ToggleGroupCallSettings,
 )
 from piltover.tl.types.phone import ExportedGroupCallInvite, GroupCallStreamChannels, GroupParticipants
@@ -152,19 +154,32 @@ async def join_group_call_handler(request: JoinGroupCall | JoinGroupCall_133, us
         chat_or_channel = await Chat.get(id=group_call.chat_id)
 
     client_params, client_ssrc = parse_join_client_params(request.params)
+    stream_kind = detect_join_stream_kind(client_params)
+    just_joined = False
 
-    participant, just_joined = await join_group_call(
-        user_id,
-        group_call,
-        request.join_as,
-        muted=request.muted,
-        video_stopped=request.video_stopped,
-        invite_hash=getattr(request, "invite_hash", None),
-        client_ssrc=client_ssrc,
-    )
+    if stream_kind == "video":
+        participant = await join_group_call_video(
+            user_id,
+            group_call,
+            client_ssrc=client_ssrc,
+            client_payload=client_params,
+            video_stopped=request.video_stopped,
+        )
+        connection_source = participant.video_source or participant.source
+    else:
+        participant, just_joined = await join_group_call(
+            user_id,
+            group_call,
+            request.join_as,
+            muted=request.muted,
+            video_stopped=request.video_stopped,
+            invite_hash=getattr(request, "invite_hash", None),
+            client_ssrc=client_ssrc,
+        )
+        connection_source = participant.source
+        schedule_sfu_participant_audio_state(group_call.id, participant)
+
     await participant.fetch_related("user")
-
-    schedule_sfu_participant_audio_state(group_call.id, participant)
 
     async def _load_active_participants() -> list[GroupCallParticipant]:
         return list(await GroupCallParticipant.filter(
@@ -192,7 +207,8 @@ async def join_group_call_handler(request: JoinGroupCall | JoinGroupCall_133, us
             request.params,
             group_call_id=group_call.id,
             user_id=user_id,
-            source=participant.source,
+            source=connection_source,
+            stream_kind=stream_kind,
         ),
         User.to_tl_bulk(await User.filter(id__in=user_ids)),
         group_call.to_tl(participants_count=participants_count),
@@ -244,6 +260,7 @@ async def edit_group_call_participant_handler(request: EditGroupCallParticipant,
         raise_hand=request.raise_hand,
         video_stopped=request.video_stopped,
         video_paused=request.video_paused,
+        presentation_paused=request.presentation_paused,
     )
     await participant.fetch_related("user", "join_as_user")
 
@@ -395,8 +412,17 @@ async def get_group_participants(request: GetGroupParticipants, user_id: int) ->
     if request.sources:
         # Source lookup must include left participants — the client resolves SSRCs
         # after leave and stops retrying only once it gets left=true for that source.
+        from tortoise.expressions import Q
+
+        source_q = Q()
+        for source_id in request.sources:
+            source_q |= (
+                Q(source=source_id)
+                | Q(video_source=source_id)
+                | Q(presentation_source=source_id)
+            )
         participants = list(
-            await query.filter(source__in=request.sources).order_by("joined_at").limit(request.limit)
+            await query.filter(source_q).order_by("joined_at").limit(request.limit)
         )
         return await _group_participants_response(
             group_call, participants, user_id=user_id, count=active_count,
@@ -430,6 +456,63 @@ async def get_group_participants(request: GetGroupParticipants, user_id: int) ->
     )
 
 
+@handler.on_request(JoinGroupCallPresentation, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
+async def join_group_call_presentation_handler(request: JoinGroupCallPresentation, user_id: int) -> Updates:
+    group_call = await GroupCall.get_from_input_raise(request.call)
+    client_params, client_ssrc = parse_join_client_params(request.params)
+
+    participant = await join_group_call_presentation(
+        user_id,
+        group_call,
+        client_ssrc=client_ssrc,
+        client_payload=client_params,
+    )
+    await participant.fetch_related("user")
+
+    if group_call.channel_id is not None:
+        chat_or_channel = await Channel.get(id=group_call.channel_id)
+    else:
+        from piltover.db.models import Chat
+        chat_or_channel = await Chat.get(id=group_call.chat_id)
+
+    connection_params = await build_connection_params(
+        request.params,
+        group_call_id=group_call.id,
+        user_id=user_id,
+        source=participant.presentation_source,
+        stream_kind="presentation",
+    )
+
+    await upd.group_call_participants_update_with_call_rpc(
+        chat_or_channel, group_call, [participant],
+        exclude_user_ids=[user_id], just_joined=False,
+        participant_versioned=False,
+    )
+
+    return UpdatesWithDefaults(
+        updates=[UpdateGroupCallConnection(params=connection_params, presentation=True)],
+    )
+
+
+@handler.on_request(LeaveGroupCallPresentation, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
+async def leave_group_call_presentation_handler(request: LeaveGroupCallPresentation, user_id: int) -> Updates:
+    group_call = await GroupCall.get_from_input_raise(request.call)
+    if group_call.channel_id is not None:
+        chat_or_channel = await Channel.get(id=group_call.channel_id)
+    else:
+        from piltover.db.models import Chat
+        chat_or_channel = await Chat.get(id=group_call.chat_id)
+
+    participant = await leave_group_call_presentation(user_id, group_call)
+    await participant.fetch_related("user")
+
+    participants_update = await upd.group_call_participants_update(
+        chat_or_channel, group_call, [participant], self_user_id=user_id,
+        broadcast=True, to_participants_only=False, participant_versioned=False,
+    )
+    return _make_updates(chat_or_channel, [participants_update])
+
+
 @handler.on_request(CheckGroupCall, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)
 async def check_group_call(request: CheckGroupCall, user_id: int) -> IntVector:
     group_call = await GroupCall.get_from_input_raise(request.call)
@@ -437,10 +520,10 @@ async def check_group_call(request: CheckGroupCall, user_id: int) -> IntVector:
     if joined is None:
         raise ErrorRpc(error_code=400, error_message="GROUPCALL_JOIN_MISSING")
 
-    existing = set(await GroupCallParticipant.filter(
-        group_call=group_call, left=False, source__in=request.sources,
-    ).values_list("source", flat=True))
-    return IntVector([source for source in request.sources if source in existing])
+    active_sources: set[int] = set()
+    for participant in await GroupCallParticipant.filter(group_call=group_call, left=False):
+        active_sources.update(participant_active_sources(participant))
+    return IntVector([source for source in request.sources if source in active_sources])
 
 
 @handler.on_request(ToggleGroupCallSettings, ReqHandlerFlags.BOT_NOT_ALLOWED | ReqHandlerFlags.DONT_FETCH_USER)

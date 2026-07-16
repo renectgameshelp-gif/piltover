@@ -5,7 +5,13 @@ from datetime import datetime, UTC
 from tortoise import Model, fields
 
 from piltover.db import models
-from piltover.tl import GroupCallParticipant as TLGroupCallParticipant, PeerUser, PeerChannel
+from piltover.tl import (
+    GroupCallParticipant as TLGroupCallParticipant,
+    GroupCallParticipantVideo,
+    GroupCallParticipantVideoSourceGroup,
+    PeerUser,
+    PeerChannel,
+)
 
 DEFAULT_GROUP_CALL_VOLUME = 10000
 ADMIN_VOLUME_MUTE_THRESHOLD = 100
@@ -27,6 +33,14 @@ class GroupCallParticipant(Model):
     volume: int = fields.IntField(default=10000)
     volume_by_admin: bool = fields.BooleanField(default=False)
     video_stopped: bool = fields.BooleanField(default=True)
+    video_source: int | None = fields.IntField(null=True, default=None)
+    presentation_source: int | None = fields.IntField(null=True, default=None)
+    video_endpoint: str | None = fields.CharField(max_length=256, null=True, default=None)
+    presentation_endpoint: str | None = fields.CharField(max_length=256, null=True, default=None)
+    video_source_groups: list[dict] | None = fields.JSONField(null=True, default=None)
+    presentation_source_groups: list[dict] | None = fields.JSONField(null=True, default=None)
+    video_paused: bool = fields.BooleanField(default=False)
+    presentation_paused: bool = fields.BooleanField(default=False)
     raise_hand_rating: int | None = fields.BigIntField(null=True, default=None)
     left: bool = fields.BooleanField(default=False)
     joined_at: datetime = fields.DatetimeField(auto_now_add=True)
@@ -77,6 +91,45 @@ class GroupCallParticipant(Model):
         user_id = self.join_as_user_id or self.user_id
         return PeerUser(user_id=user_id)
 
+    @staticmethod
+    def _source_groups_to_tl(
+            source_groups: list[dict] | None,
+    ) -> list[GroupCallParticipantVideoSourceGroup]:
+        if not source_groups:
+            return []
+        result: list[GroupCallParticipantVideoSourceGroup] = []
+        for group in source_groups:
+            if not isinstance(group, dict):
+                continue
+            sources = group.get("sources")
+            if not isinstance(sources, list):
+                continue
+            result.append(GroupCallParticipantVideoSourceGroup(
+                semantics=str(group.get("semantics", "default")),
+                sources=[int(s) for s in sources],
+            ))
+        return result
+
+    def _video_stream_to_tl(
+            self,
+            *,
+            source: int | None,
+            endpoint: str | None,
+            source_groups: list[dict] | None,
+            paused: bool,
+    ) -> GroupCallParticipantVideo | None:
+        if source is None or not endpoint:
+            return None
+        groups = self._source_groups_to_tl(source_groups)
+        if not groups:
+            groups = [GroupCallParticipantVideoSourceGroup(semantics="default", sources=[source])]
+        return GroupCallParticipantVideo(
+            endpoint=endpoint,
+            source_groups=groups,
+            paused=paused,
+            audio_source=self.source,
+        )
+
     def to_tl_active_ping(self) -> TLGroupCallParticipant:
         now = int(datetime.now(UTC).timestamp())
         return TLGroupCallParticipant(
@@ -107,6 +160,18 @@ class GroupCallParticipant(Model):
         if versioned is None:
             versioned = not min_
         # muted_by_you is for per-viewer local mute ("muted for you"), not admin mute.
+        video = self._video_stream_to_tl(
+            source=self.video_source,
+            endpoint=self.video_endpoint,
+            source_groups=self.video_source_groups,
+            paused=self.video_paused,
+        )
+        presentation = self._video_stream_to_tl(
+            source=self.presentation_source,
+            endpoint=self.presentation_endpoint,
+            source_groups=self.presentation_source_groups,
+            paused=self.presentation_paused,
+        )
         return TLGroupCallParticipant(
             muted=self.muted or admin_muted,
             left=self.left,
@@ -123,4 +188,6 @@ class GroupCallParticipant(Model):
             source=self.source,
             volume=self.volume if show_volume_override else None,
             raise_hand_rating=self.raise_hand_rating,
+            video=video,
+            presentation=presentation,
         )
